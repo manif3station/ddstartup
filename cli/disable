@@ -1,0 +1,11 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use FindBin qw($Bin);
+use JSON::PP qw(encode_json);
+use lib "$Bin/../lib";
+
+use DDStartup::Manager;
+
+my $manager = DDStartup::Manager->new();
+print encode_json( $manager->disable(@ARGV) );

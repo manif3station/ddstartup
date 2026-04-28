@@ -1,0 +1,6 @@
+Revision history for ddstartup
+
+0.01 2026-04-28
+    - created the ddstartup skill to manage systemd startup for Developer Dashboard
+    - added setup, status, logs, and remove commands for systemctl and journalctl
+    - verified the skill in Docker with 100% coverage
