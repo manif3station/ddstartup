@@ -1,5 +1,9 @@
 Revision history for ddstartup
 
+0.02 2026-04-28
+    - changed ddstartup commands to print pretty table output by default
+    - added -o json support across setup, enable, disable, status, logs, and remove
+
 0.01 2026-04-28
     - created the ddstartup skill to manage systemd startup for Developer Dashboard
     - added setup, status, logs, and remove commands for systemctl and journalctl

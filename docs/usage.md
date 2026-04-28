@@ -8,6 +8,11 @@ dashboard skills install git@github.com:manif3station/ddstartup.git
 
 ## Commands
 
+Output mode:
+
+- default output is a readable table
+- `-o json` switches any `ddstartup` command to JSON
+
 Set up a startup unit:
 
 ```bash
@@ -44,6 +49,12 @@ Inspect unit state:
 dashboard ddstartup.status
 ```
 
+Inspect the same state as JSON:
+
+```bash
+dashboard ddstartup.status -o json
+```
+
 Read recent logs:
 
 ```bash
@@ -56,10 +67,22 @@ Read a shorter log window:
 dashboard ddstartup.logs --lines 20
 ```
 
+Read logs as JSON:
+
+```bash
+dashboard ddstartup.logs -o json --lines 20
+```
+
 Remove the unit:
 
 ```bash
 dashboard ddstartup.remove
+```
+
+Get remove confirmation as JSON:
+
+```bash
+dashboard ddstartup.remove -o json
 ```
 
 ## Scope Rules

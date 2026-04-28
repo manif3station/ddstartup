@@ -17,4 +17,5 @@ It helps users keep DD alive across reboots without remembering a manual restart
 - enables and starts that unit through `systemctl`
 - reports unit state through `systemctl`
 - reports unit logs through `journalctl`
+- renders human-readable tables by default and `-o json` on demand
 - disables and removes the unit again

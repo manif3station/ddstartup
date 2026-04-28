@@ -37,32 +37,47 @@ local $ENV{DDSTARTUP_EUID} = 1000;
 
 my $setup = qx{$^X cli/setup};
 is( $? >> 8, 0, 'cli/setup exits cleanly' );
-my $setup_payload = decode_json($setup);
-is( $setup_payload->{scope}, 'user', 'cli/setup defaults to user scope' );
+like( $setup, qr/\bFIELD\b/, 'cli/setup defaults to table output' );
+like( $setup, qr/\bscope\b\s+user\b/, 'cli/setup table reports user scope' );
+
+my $setup_json = qx{$^X cli/setup -o json};
+is( $? >> 8, 0, 'cli/setup -o json exits cleanly' );
+my $setup_payload = decode_json($setup_json);
+is( $setup_payload->{scope}, 'user', 'cli/setup json reports user scope' );
 
 my $disable = qx{$^X cli/disable};
 is( $? >> 8, 0, 'cli/disable exits cleanly' );
-my $disable_payload = decode_json($disable);
-ok( $disable_payload->{disabled}, 'cli/disable reports success' );
+like( $disable, qr/\bdisabled\b\s+1\b/, 'cli/disable defaults to table output' );
 
 my $enable = qx{$^X cli/enable};
 is( $? >> 8, 0, 'cli/enable exits cleanly' );
-my $enable_payload = decode_json($enable);
-is( $enable_payload->{scope}, 'user', 'cli/enable restores user scope startup' );
+like( $enable, qr/\bscope\b\s+user\b/, 'cli/enable table reports user scope' );
 
 my $status = qx{$^X cli/status};
 is( $? >> 8, 0, 'cli/status exits cleanly' );
-my $status_payload = decode_json($status);
+like( $status, qr/\benabled\b\s+enabled\b/, 'cli/status defaults to table output' );
+my $status_json = qx{$^X cli/status -o json};
+is( $? >> 8, 0, 'cli/status -o json exits cleanly' );
+my $status_payload = decode_json($status_json);
 is( $status_payload->{active}, 'active', 'cli/status reports active state' );
 is( $status_payload->{enabled}, 'enabled', 'cli/status reports enabled state' );
 
 my $logs = qx{$^X cli/logs --lines 12};
 is( $? >> 8, 0, 'cli/logs exits cleanly' );
-is( $logs, "journal line\n", 'cli/logs prints journal output' );
+like( $logs, qr/\bFIELD\b/, 'cli/logs defaults to table output' );
+like( $logs, qr/\blines\b\s+12\b/, 'cli/logs table reports the requested line count' );
+like( $logs, qr/\blogs\b\s+journal line\b/, 'cli/logs table carries the log payload' );
+
+my $logs_json = qx{$^X cli/logs -o json --lines 12};
+is( $? >> 8, 0, 'cli/logs -o json exits cleanly' );
+is( decode_json($logs_json)->{logs}, "journal line\n", 'cli/logs json returns machine-readable logs' );
 
 my $remove = qx{$^X cli/remove};
 is( $? >> 8, 0, 'cli/remove exits cleanly' );
-my $remove_payload = decode_json($remove);
+like( $remove, qr/\bremoved\b\s+1\b/, 'cli/remove defaults to table output' );
+my $remove_json = qx{$^X cli/remove -o json};
+is( $? >> 8, 0, 'cli/remove -o json exits cleanly' );
+my $remove_payload = decode_json($remove_json);
 ok( $remove_payload->{removed}, 'cli/remove reports success' );
 
 open my $lfh, '<', $logs_file or die "Unable to read $logs_file: $!";

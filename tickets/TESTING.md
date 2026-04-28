@@ -19,6 +19,7 @@ docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-tes
 - Functional test:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'cd /workspace/skills/ddstartup && prove -lr t'`
   - Result: pass
+  - Test count: `Files=4, Tests=86`
 - Coverage test:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'cd /workspace/skills/ddstartup && cover -delete && HARNESS_PERL_SWITCHES=-MDevel::Cover prove -lr t && cover -report text -select_re "^lib/" -coverage statement -coverage subroutine'`
   - Result: pass
@@ -27,15 +28,19 @@ docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-tes
   - `dashboard skills install /home/mv/projects/skills/skills/ddstartup` with mocked `systemctl` and `journalctl`
   - Result: pass, install auto-provisioned `developer-dashboard-startup.service`
   - `dashboard ddstartup.status`
-  - Result: pass, returned `enabled` and `active`
+  - Result: pass, returned default table output with `enabled` and `active`
+  - `dashboard ddstartup.status -o json`
+  - Result: pass, returned JSON
   - `dashboard ddstartup.logs --lines 5`
-  - Result: pass, returned mocked journal output
+  - Result: pass, returned default table output with mocked journal output
+  - `dashboard ddstartup.logs -o json --lines 5`
+  - Result: pass, returned JSON
   - `dashboard ddstartup.disable`
-  - Result: pass, disabled the unit without deleting it
+  - Result: pass, returned default table output and disabled the unit without deleting it
   - `dashboard ddstartup.enable`
-  - Result: pass, restored the unit
+  - Result: pass, returned default table output and restored the unit
   - `dashboard ddstartup.remove`
-  - Result: pass, removed the unit file and reloaded the daemon
+  - Result: pass, returned default table output, removed the unit file, and reloaded the daemon
 - Cleanup:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'rm -rf /workspace/skills/ddstartup/cover_db'`
   - Result: pass

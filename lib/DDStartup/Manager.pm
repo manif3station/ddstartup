@@ -6,6 +6,7 @@ use warnings;
 use Cwd qw(getcwd);
 use File::Path qw(make_path);
 use File::Spec;
+use JSON::PP qw(encode_json);
 
 sub new {
     my ( $class, %args ) = @_;
@@ -121,6 +122,77 @@ sub remove {
         unit_path    => $unit_path,
         removed      => -e $unit_path ? 0 : 1,
     };
+}
+
+sub parse_common_argv {
+    my ( $self, @argv ) = @_;
+    my $output = 'table';
+    my @rest;
+    while (@argv) {
+        my $arg = shift @argv;
+        if ( defined $arg && $arg eq '-o' ) {
+            $output = shift @argv;
+            next;
+        }
+        if ( defined $arg && $arg =~ /^-o=(.+)\z/ ) {
+            $output = $1;
+            next;
+        }
+        push @rest, $arg;
+    }
+    return ( $output || 'table', @rest );
+}
+
+sub render_result {
+    my ( $self, %args ) = @_;
+    my $output = $args{output} || 'table';
+    my $type   = $args{type}   || 'record';
+    my $result = $args{result};
+    return encode_json($result) if $output eq 'json';
+    return $self->format_logs_table($result) if $type eq 'logs';
+    return $self->format_kv_table($result);
+}
+
+sub format_kv_table {
+    my ( $self, $data ) = @_;
+    my @keys = grep { exists $data->{$_} } qw(scope service_name unit_path dashboard working_directory wanted_by enabled active disabled removed skipped reason);
+    my $width = 5;
+    for my $key (@keys) {
+        $width = length($key) if length($key) > $width;
+    }
+    my $text = sprintf "%-*s  %s\n", $width, 'FIELD', 'VALUE';
+    $text .= sprintf "%-*s  %s\n", $width, '-' x $width, '-' x 5;
+    for my $key (@keys) {
+        my $value = $data->{$key};
+        $value = '' if !defined $value;
+        $value = $value ? 1 : 0 if ref(\$value) eq 'SCALAR' && ( $value eq '0' || $value eq '1' );
+        $text .= sprintf "%-*s  %s\n", $width, $key, $value;
+    }
+    return $text;
+}
+
+sub format_logs_table {
+    my ( $self, $data ) = @_;
+    my $logs = defined $data->{logs} ? $data->{logs} : q{};
+    $logs =~ s/\n\z//;
+    my @lines = split /\n/, $logs;
+    @lines = ('') if !@lines;
+    my @rows = (
+        [ scope        => $data->{scope} ],
+        [ service_name => $data->{service_name} ],
+        [ lines        => $data->{lines} ],
+        [ logs         => shift @lines ],
+    );
+    push @rows, map { [ q{}, $_ ] } @lines if @lines;
+    my $width = length('service_name');
+    my $text = sprintf "%-*s  %s\n", $width, 'FIELD', 'VALUE';
+    $text .= sprintf "%-*s  %s\n", $width, '-' x $width, '-' x 5;
+    for my $row (@rows) {
+        my ( $key, $value ) = @{$row};
+        $value = '' if !defined $value;
+        $text .= sprintf "%-*s  %s\n", $width, $key, $value;
+    }
+    return $text;
 }
 
 sub unit_dir {

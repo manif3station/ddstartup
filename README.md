@@ -61,6 +61,11 @@ When this skill is installed through `dashboard skills install`, its `Makefile` 
 
 ## CLI Usage
 
+Output mode:
+
+- default output is a human-readable table
+- pass `-o json` when you want machine-readable JSON
+
 Normal user-scope setup:
 
 ```bash
@@ -87,8 +92,21 @@ dashboard ddstartup.setup --system
 
 Example setup result:
 
-```json
-{"dashboard":"/usr/bin/dashboard","scope":"user","service_name":"developer-dashboard-startup.service","unit_path":"~/.config/systemd/user/developer-dashboard-startup.service","wanted_by":"default.target","working_directory":"~"}
+```text
+FIELD              VALUE
+-----------------  -----
+scope              user
+service_name       developer-dashboard-startup.service
+unit_path          ~/.config/systemd/user/developer-dashboard-startup.service
+dashboard          /usr/bin/dashboard
+working_directory  ~
+wanted_by          default.target
+```
+
+JSON form:
+
+```bash
+dashboard ddstartup.setup -o json
 ```
 
 Check service state:
@@ -99,8 +117,14 @@ dashboard ddstartup.status
 
 Example status result:
 
-```json
-{"active":"active","enabled":"enabled","scope":"user","service_name":"developer-dashboard-startup.service","unit_path":"~/.config/systemd/user/developer-dashboard-startup.service"}
+```text
+FIELD         VALUE
+------------  -----
+scope         user
+service_name  developer-dashboard-startup.service
+unit_path     ~/.config/systemd/user/developer-dashboard-startup.service
+enabled       enabled
+active        active
 ```
 
 Read recent logs:
@@ -109,10 +133,18 @@ Read recent logs:
 dashboard ddstartup.logs
 ```
 
+Default logs output is a table that includes the scope, unit name, requested line count, and the returned journal content.
+
 Read a shorter log window:
 
 ```bash
 dashboard ddstartup.logs --lines 20
+```
+
+JSON log output:
+
+```bash
+dashboard ddstartup.logs -o json --lines 20
 ```
 
 Remove the startup unit:
@@ -125,6 +157,12 @@ Disable auto-start but keep the unit definition for later restore:
 
 ```bash
 dashboard ddstartup.disable
+```
+
+JSON disable output:
+
+```bash
+dashboard ddstartup.disable -o json
 ```
 
 Then uninstall the skill itself if you no longer want it:
@@ -151,6 +189,12 @@ Normal case, inspect whether the unit is enabled and active:
 
 ```bash
 dashboard ddstartup.status
+```
+
+Normal case, script against the same command:
+
+```bash
+dashboard ddstartup.status -o json
 ```
 
 Normal case, inspect the latest service output:

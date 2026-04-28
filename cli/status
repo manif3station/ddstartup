@@ -2,10 +2,14 @@
 use strict;
 use warnings;
 use FindBin qw($Bin);
-use JSON::PP qw(encode_json);
 use lib "$Bin/../lib";
 
 use DDStartup::Manager;
 
 my $manager = DDStartup::Manager->new();
-print encode_json( $manager->status(@ARGV) );
+my ( $output, @args ) = $manager->parse_common_argv(@ARGV);
+print $manager->render_result(
+    output => $output,
+    type   => 'record',
+    result => $manager->status(@args),
+);

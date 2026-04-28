@@ -3,6 +3,7 @@ use warnings;
 
 use File::Path qw(make_path);
 use File::Temp qw(tempdir);
+use JSON::PP qw(decode_json);
 use Test::More;
 
 use lib 'lib';
@@ -124,6 +125,46 @@ is( $root_setup->{wanted_by}, 'multi-user.target', 'system scope uses multi-user
 
 my $root_auto = $root_manager->auto_setup();
 ok( $root_auto->{skipped}, 'root auto_setup also skips when the system unit already exists' );
+
+my ( $output_mode, @parsed ) = $manager->parse_common_argv( '--user', '-o', 'json' );
+is( $output_mode, 'json', 'parse_common_argv accepts explicit json output' );
+is_deeply( \@parsed, ['--user'], 'parse_common_argv preserves non-output args' );
+
+( $output_mode, @parsed ) = $manager->parse_common_argv('--system');
+is( $output_mode, 'table', 'parse_common_argv defaults to table output' );
+is_deeply( \@parsed, ['--system'], 'parse_common_argv keeps scope flags' );
+
+( $output_mode, @parsed ) = $manager->parse_common_argv('-o=json', '--user');
+is( $output_mode, 'json', 'parse_common_argv accepts inline output form' );
+is_deeply( \@parsed, ['--user'], 'parse_common_argv keeps other args with inline output form' );
+
+my $record_table = $manager->render_result(
+    output => 'table',
+    type   => 'record',
+    result => $status,
+);
+like( $record_table, qr/\bFIELD\b/, 'record table includes a header row' );
+like( $record_table, qr/\benabled\b.*\bok\b/s, 'record table renders key-value rows' );
+
+my $record_json = $manager->render_result(
+    output => 'json',
+    type   => 'record',
+    result => $status,
+);
+is( decode_json($record_json)->{active}, 'ok', 'record json output stays machine-readable' );
+
+my $logs_table = $manager->render_result(
+    output => 'table',
+    type   => 'logs',
+    result => {
+        scope        => 'user',
+        service_name => 'developer-dashboard-startup.service',
+        lines        => 20,
+        logs         => "alpha\nbeta\n",
+    },
+);
+like( $logs_table, qr/\blogs\b.*alpha/s, 'logs table renders the first log line' );
+like( $logs_table, qr/\n\s*beta\n/s, 'logs table keeps later log lines on following rows' );
 
 my $missing_tool_error = eval {
     DDStartup::Manager->new(

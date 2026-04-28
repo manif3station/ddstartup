@@ -8,10 +8,29 @@ use DDStartup::Manager;
 
 my @args = @ARGV;
 my $lines = 50;
+my $output = 'table';
+if ( @args >= 2 && $args[0] eq '-o' ) {
+    $output = $args[1];
+    splice @args, 0, 2;
+}
+elsif ( @args >= 1 && $args[0] =~ /^-o=(.+)\z/ ) {
+    $output = $1;
+    shift @args;
+}
 if ( @args >= 2 && $args[0] eq '--lines' ) {
     $lines = $args[1];
     splice @args, 0, 2;
 }
 
 my $manager = DDStartup::Manager->new();
-print $manager->logs( lines => $lines, argv => \@args );
+my $logs = $manager->logs( lines => $lines, argv => \@args );
+print $manager->render_result(
+    output => $output,
+    type   => 'logs',
+    result => {
+        scope        => $manager->scope_from_args(@args),
+        service_name => $manager->{service_name},
+        lines        => $lines,
+        logs         => $logs,
+    },
+);
