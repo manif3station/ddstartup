@@ -1,5 +1,11 @@
 Revision history for ddstartup
 
+0.06 2026-04-29
+    - fixed startup units and launchd plists to derive Perl library paths from the installed dashboard layout
+    - added support for dashboard installs that need sibling lib/perl5 paths such as ~/perl5/bin/dashboard
+    - changed startup definitions to run dashboard through the detected active Perl interpreter
+    - verified macOS startup logs and restart commands through the generated launch agent environment
+
 0.05 2026-04-28
     - added native macOS launchd support beside the existing systemd backend
     - added launchctl-based setup, enable, disable, status, logs, and remove behavior for macOS

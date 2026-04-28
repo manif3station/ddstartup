@@ -15,11 +15,11 @@ docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-tes
 
 ## Latest Verification
 
-- Date: 2026-04-28
+- Date: 2026-04-29
 - Functional test:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'cd /workspace/skills/ddstartup && prove -lr t'`
   - Result: pass
-  - Test count: `Files=4, Tests=144`
+  - Test count: `Files=4, Tests=150`
 - Coverage test:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'cd /workspace/skills/ddstartup && cover -delete && HARNESS_PERL_SWITCHES=-MDevel::Cover prove -lr t && cover -report text -select_re "^lib/" -coverage statement -coverage subroutine'`
   - Result: pass
@@ -34,15 +34,18 @@ docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-tes
   - `journalctl --user -u developer-dashboard-startup.service --no-pager -n 20`
   - Result: pass, latest successful startup showed `dashboard restart` completing under systemd
 - macOS proof through `ssh macdev`:
-  - `~/.developer-dashboard/skills/ddstartup/cli/setup`
-  - Result: pass, wrote `~/Library/LaunchAgents/developer-dashboard-startup.plist` and returned `activation=deferred` in the SSH session
-  - `~/.developer-dashboard/skills/ddstartup/cli/status`
+  - `zsh -lic 'dashboard ddstartup.setup'`
+  - Result: pass, wrote `~/Library/LaunchAgents/developer-dashboard-startup.plist` with `ProgramArguments` pointing to the active login-shell Perl and `dashboard`, plus derived `PERL5LIB` entries
+  - manual plist command proof:
+  - `HOME=$HOME PERL5LIB=<plist-perl5lib> <plist-perl> <plist-dashboard> restart`
+  - Result: pass, returned `rc=0` with no stderr
+  - `zsh -lic 'dashboard ddstartup.status'`
   - Result: pass, returned `enabled` and `active=configured`
-  - `~/.developer-dashboard/skills/ddstartup/cli/logs --lines 2`
-  - Result: pass, returned the trailing lines from `~/Library/Logs/developer-dashboard-startup.log` and `.err.log`
-  - `~/.developer-dashboard/skills/ddstartup/cli/disable`
+  - `zsh -lic 'dashboard ddstartup.logs --lines 5'`
+  - Result: pass, returned the default logs table; the log payload was empty in the deferred SSH-session case
+  - `zsh -lic 'dashboard ddstartup.disable'`
   - Result: pass
-  - `~/.developer-dashboard/skills/ddstartup/cli/remove`
+  - `zsh -lic 'dashboard ddstartup.remove'`
   - Result: pass, removed `~/Library/LaunchAgents/developer-dashboard-startup.plist`
 - Cleanup:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'rm -rf /workspace/skills/ddstartup/cover_db'`

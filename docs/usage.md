@@ -103,6 +103,10 @@ dashboard ddstartup.remove -o json
 
 `ddstartup` writes the active DD Perl library path into the generated unit so `dashboard restart` can run under systemd without depending on shell-only `PERL5LIB` setup.
 
+It also inspects the installed `dashboard` path and prepends dashboard-adjacent Perl library directories such as `../lib/perl5` and `../lib` when they exist. This covers installs such as `~/perl5/bin/dashboard` where DD modules live under `~/perl5/lib/perl5`.
+
+The generated startup definition runs `dashboard` through the active Perl interpreter captured when `ddstartup.setup` runs. That avoids boot-time shebang problems on hosts where `#!/usr/bin/env perl` would otherwise resolve to the wrong Perl.
+
 On macOS, the generated plist carries the same `HOME` and `PERL5LIB` information through launchd `EnvironmentVariables`.
 
 ## Unit Paths

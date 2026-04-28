@@ -20,6 +20,7 @@ my $manager = DDStartup::Manager->new(
     cwd            => $home,
     euid           => 1000,
     dashboard_bin  => '/usr/bin/dashboard',
+    perl_bin       => '/usr/bin/perl',
     perl5lib       => '/opt/dd/lib:/opt/perl5/lib/perl5',
     systemctl_bin  => '/usr/bin/systemctl',
     journalctl_bin => '/usr/bin/journalctl',
@@ -43,6 +44,7 @@ my $auto_manager = DDStartup::Manager->new(
     cwd             => "$auto_tmp/home",
     euid            => 1000,
     dashboard_bin   => '/usr/bin/dashboard',
+    perl_bin        => '/usr/bin/perl',
     systemctl_bin   => '/usr/bin/systemctl',
     journalctl_bin  => '/usr/bin/journalctl',
     user_unit_dir   => "$auto_tmp/user-units",
@@ -74,8 +76,8 @@ open my $ufh, '<', $setup->{unit_path} or die "Unable to read $setup->{unit_path
 local $/;
 my $unit = <$ufh>;
 close $ufh or die "Unable to close $setup->{unit_path}: $!";
-like( $unit, qr/\QExecStart=\/usr\/bin\/dashboard restart\E/, 'unit file starts DD through dashboard restart' );
-like( $unit, qr/\QExecStop=\/usr\/bin\/dashboard stop\E/, 'unit file stops DD through dashboard stop' );
+like( $unit, qr/\QExecStart=\/usr\/bin\/perl \/usr\/bin\/dashboard restart\E/, 'unit file starts DD through the detected perl interpreter and dashboard script' );
+like( $unit, qr/\QExecStop=\/usr\/bin\/perl \/usr\/bin\/dashboard stop\E/, 'unit file stops DD through the detected perl interpreter and dashboard script' );
 like( $unit, qr/\QWantedBy=default.target\E/, 'user scope unit uses default.target' );
 like( $unit, qr/\QEnvironment=PERL5LIB=\/opt\/dd\/lib:\/opt\/perl5\/lib\/perl5\E/, 'unit file preserves PERL5LIB when the runtime depends on it' );
 
@@ -87,6 +89,7 @@ like( $unit, qr/\QEnvironment=PERL5LIB=\/opt\/dd\/lib:\/opt\/perl5\/lib\/perl5\E
         cwd             => $home,
         euid            => 1000,
         dashboard_bin   => '/usr/bin/dashboard',
+        perl_bin        => '/usr/bin/perl',
         systemctl_bin   => '/usr/bin/systemctl',
         journalctl_bin  => '/usr/bin/journalctl',
         user_unit_dir   => "$tmp/inc-user-units",
@@ -95,8 +98,103 @@ like( $unit, qr/\QEnvironment=PERL5LIB=\/opt\/dd\/lib:\/opt\/perl5\/lib\/perl5\E
     );
     like(
         $inc_manager->unit_text('user'),
-        qr/\QEnvironment=PERL5LIB=\/opt\/dd\/lib:\/opt\/perl5\/lib\/perl5\E/,
-        'unit file falls back to runtime @INC when PERL5LIB is unset',
+        qr/Environment=PERL5LIB=.*\Q\/opt\/dd\/lib:\/opt\/perl5\/lib\/perl5\E/,
+        'unit file includes runtime @INC when PERL5LIB is unset',
+    );
+}
+
+{
+    local $ENV{PERL5LIB};
+    local @INC = ( '/opt/runtime/lib', @INC );
+    my $dashboard_root = "$tmp/dashboard-tree";
+    my $dashboard_bin_dir = "$dashboard_root/bin";
+    my $dashboard_lib_dir = "$dashboard_root/lib";
+    my $dashboard_perl5_dir = "$dashboard_lib_dir/perl5";
+    make_path( $dashboard_bin_dir, $dashboard_perl5_dir );
+    open my $dfh, '>', "$dashboard_bin_dir/dashboard" or die "Unable to create dashboard stub: $!";
+    print {$dfh} "#!/usr/bin/env perl\n";
+    close $dfh or die "Unable to close dashboard stub: $!";
+
+    my $layout_manager = DDStartup::Manager->new(
+        home            => $home,
+        cwd             => $home,
+        euid            => 1000,
+        dashboard_bin   => "$dashboard_bin_dir/dashboard",
+        perl_bin        => '/usr/bin/perl',
+        systemctl_bin   => '/usr/bin/systemctl',
+        journalctl_bin  => '/usr/bin/journalctl',
+        user_unit_dir   => "$tmp/layout-user-units",
+        system_unit_dir => "$tmp/layout-system-units",
+        runner          => sub { return { exit => 0, stdout => "ok\n", stderr => q{} } },
+    );
+    like(
+        $layout_manager->unit_text('user'),
+        qr/\QEnvironment=PERL5LIB=$dashboard_perl5_dir:$dashboard_lib_dir:\/opt\/runtime\/lib\E/,
+        'unit file derives dashboard sibling perl libraries before runtime @INC',
+    );
+    like(
+        $layout_manager->unit_text('user'),
+        qr/\QExecStart=\/usr\/bin\/perl $dashboard_bin_dir\/dashboard restart\E/,
+        'unit file uses the configured perl interpreter with the derived dashboard script path',
+    );
+}
+
+{
+    local $ENV{PERL5LIB};
+    local $ENV{PATH} = '/nonexistent';
+    my $home_dashboard = "$tmp/home-dashboard";
+    make_path(
+        "$home_dashboard/perl5/bin",
+        "$home_dashboard/perl5/lib/perl5",
+    );
+    open my $dfh, '>', "$home_dashboard/perl5/bin/dashboard" or die "Unable to create home dashboard stub: $!";
+    print {$dfh} "#!/usr/bin/env perl\n";
+    close $dfh or die "Unable to close home dashboard stub: $!";
+    chmod 0755, "$home_dashboard/perl5/bin/dashboard" or die "Unable to chmod home dashboard stub: $!";
+
+    my $detected_manager = DDStartup::Manager->new(
+        home            => $home_dashboard,
+        cwd             => $home_dashboard,
+        euid            => 1000,
+        systemctl_bin   => '/usr/bin/systemctl',
+        journalctl_bin  => '/usr/bin/journalctl',
+        user_unit_dir   => "$tmp/detected-user-units",
+        system_unit_dir => "$tmp/detected-system-units",
+        runner          => sub { return { exit => 0, stdout => "ok\n", stderr => q{} } },
+    );
+    like(
+        $detected_manager->unit_text('user'),
+        qr/\QExecStart=\E.+\Q $home_dashboard\/perl5\/bin\/dashboard restart\E/,
+        'manager discovers dashboard from the home perl5 bin layout when PATH is missing it',
+    );
+    like(
+        $detected_manager->unit_text('user'),
+        qr/\QEnvironment=PERL5LIB=$home_dashboard\/perl5\/lib\/perl5:$home_dashboard\/perl5\/lib\E/,
+        'manager derives perl libraries from the discovered home dashboard layout',
+    );
+}
+
+{
+    local $ENV{PERL5LIB};
+    local $ENV{PATH} = '/nonexistent';
+    local $^X = q{};
+    my $fallback_home = "$tmp/fallback-home";
+    make_path($fallback_home);
+
+    my $fallback_manager = DDStartup::Manager->new(
+        home            => $fallback_home,
+        cwd             => $fallback_home,
+        euid            => 1000,
+        systemctl_bin   => '/usr/bin/systemctl',
+        journalctl_bin  => '/usr/bin/journalctl',
+        user_unit_dir   => "$tmp/fallback-user-units",
+        system_unit_dir => "$tmp/fallback-system-units",
+        runner          => sub { return { exit => 0, stdout => "ok\n", stderr => q{} } },
+    );
+    like(
+        $fallback_manager->unit_text('user'),
+        qr/\QExecStart=\E.+\Q dashboard restart\E/,
+        'manager falls back to the bare dashboard command when no installed dashboard path can be discovered',
     );
 }
 
@@ -127,6 +225,7 @@ my $unsupported_auto = DDStartup::Manager->new(
     cwd             => "$tmp/no-systemd-home",
     euid            => 1000,
     dashboard_bin   => '/usr/bin/dashboard',
+    perl_bin        => '/usr/bin/perl',
     systemctl_bin   => 'journalctl_bin',
     journalctl_bin  => '/usr/bin/journalctl',
     user_unit_dir   => "$tmp/no-systemd-user-units",
@@ -148,6 +247,7 @@ my $root_manager = DDStartup::Manager->new(
     cwd             => '/root',
     euid            => 0,
     dashboard_bin   => '/usr/bin/dashboard',
+    perl_bin        => '/usr/bin/perl',
     systemctl_bin   => '/usr/bin/systemctl',
     journalctl_bin  => '/usr/bin/journalctl',
     user_unit_dir   => "$tmp/ignored-user-units",
@@ -209,6 +309,7 @@ my $missing_tool_error = eval {
         cwd           => $home,
         euid          => 1000,
         dashboard_bin => '/usr/bin/dashboard',
+        perl_bin      => '/usr/bin/perl',
         systemctl_bin => undef,
     )->setup();
     return;
@@ -221,6 +322,7 @@ $missing_tool_error = eval {
         cwd           => $home,
         euid          => 1000,
         dashboard_bin => '/usr/bin/dashboard',
+        perl_bin      => '/usr/bin/perl',
         systemctl_bin => '/usr/bin/systemctl',
         journalctl_bin => undef,
     )->logs();
@@ -317,6 +419,7 @@ my $mac_manager = DDStartup::Manager->new(
     cwd                       => $mac_home,
     euid                      => 501,
     dashboard_bin             => '/usr/local/bin/dashboard',
+    perl_bin                  => '/usr/local/bin/perl',
     perl5lib                  => '/opt/dd/lib:/opt/perl5/lib/perl5',
     launchctl_bin             => "$real_bin/launchctl",
     user_launch_agents_dir    => $mac_launch_agents,
@@ -339,6 +442,7 @@ my $plist = <$mfh>;
 close $mfh or die "Unable to close $mac_setup->{unit_path}: $!";
 like( $plist, qr/<key>Label<\/key>\s*<string>developer-dashboard-startup<\/string>/s, 'mac plist includes the launchd label' );
 like( $plist, qr/<key>RunAtLoad<\/key>\s*<true\/>/s, 'mac plist runs at load' );
+like( $plist, qr{\Q/usr/local/bin/perl\E}s, 'mac plist carries the detected perl path' );
 like( $plist, qr{\Q/usr/local/bin/dashboard\E}s, 'mac plist carries the dashboard path' );
 like( $plist, qr{\Q$mac_logs_dir/developer-dashboard-startup.log\E}s, 'mac plist writes stdout logs to the expected path' );
 like( $plist, qr{\Q$mac_logs_dir/developer-dashboard-startup.err.log\E}s, 'mac plist writes stderr logs to the expected path' );
@@ -387,6 +491,7 @@ my $mac_auto = DDStartup::Manager->new(
     cwd                    => $mac_auto_home,
     euid                   => 501,
     dashboard_bin          => '/usr/local/bin/dashboard',
+    perl_bin               => '/usr/local/bin/perl',
     launchctl_bin          => "$real_bin/launchctl",
     user_launch_agents_dir => $mac_auto_agents,
     user_logs_dir          => $mac_auto_logs,

@@ -3,7 +3,7 @@ package DDStartup::Manager;
 use strict;
 use warnings;
 
-use Cwd qw(getcwd);
+use Cwd qw(abs_path getcwd);
 use File::Path qw(make_path);
 use File::Spec;
 use JSON::PP qw(encode_json);
@@ -18,8 +18,9 @@ sub new {
     my $home = exists $args{home} ? $args{home} : ( $ENV{HOME} || q{} );
     my $cwd = exists $args{cwd} ? $args{cwd} : ( $args{home} || $ENV{HOME} || getcwd() );
     my $euid = defined $args{euid} ? $args{euid} : ( defined $ENV{DDSTARTUP_EUID} ? $ENV{DDSTARTUP_EUID} : $> );
-    my $dashboard_bin = exists $args{dashboard_bin} ? $args{dashboard_bin} : ( _which('dashboard') || 'dashboard' );
-    my $perl5lib = exists $args{perl5lib} ? $args{perl5lib} : _runtime_perl5lib();
+    my $dashboard_bin = exists $args{dashboard_bin} ? $args{dashboard_bin} : _detect_dashboard_bin($home);
+    my $perl_bin = exists $args{perl_bin} ? $args{perl_bin} : _detect_perl_bin($dashboard_bin);
+    my $perl5lib = exists $args{perl5lib} ? $args{perl5lib} : _runtime_perl5lib($dashboard_bin);
     my $systemctl_bin = exists $args{systemctl_bin} ? $args{systemctl_bin} : ( $ENV{DDSTARTUP_SYSTEMCTL_BIN} || _which('systemctl') );
     my $journalctl_bin = exists $args{journalctl_bin} ? $args{journalctl_bin} : ( $ENV{DDSTARTUP_JOURNALCTL_BIN} || _which('journalctl') );
     my $launchctl_bin = exists $args{launchctl_bin} ? $args{launchctl_bin} : ( $ENV{DDSTARTUP_LAUNCHCTL_BIN} || _which('launchctl') );
@@ -39,6 +40,7 @@ sub new {
         systemd_service_name      => $systemd_service_name,
         launchd_label             => $launchd_label,
         dashboard_bin             => $dashboard_bin,
+        perl_bin                  => $perl_bin,
         perl5lib                  => $perl5lib,
         systemctl_bin             => $systemctl_bin,
         journalctl_bin            => $journalctl_bin,
@@ -413,9 +415,9 @@ sub _unit_text_systemd {
       'WorkingDirectory=' . $self->{cwd},
       'Environment=HOME=' . $self->{home},
       ( $self->{perl5lib} ne q{} ? ( 'Environment=PERL5LIB=' . $self->{perl5lib} ) : () ),
-      'ExecStart=' . $self->{dashboard_bin} . ' restart',
-      'ExecStop=' . $self->{dashboard_bin} . ' stop',
-      'ExecReload=' . $self->{dashboard_bin} . ' restart',
+      'ExecStart=' . $self->{perl_bin} . ' ' . $self->{dashboard_bin} . ' restart',
+      'ExecStop=' . $self->{perl_bin} . ' ' . $self->{dashboard_bin} . ' stop',
+      'ExecReload=' . $self->{perl_bin} . ' ' . $self->{dashboard_bin} . ' restart',
       q{},
       '[Install]',
       'WantedBy=' . $wanted_by,
@@ -443,6 +445,7 @@ sub _plist_text {
       qq{  <string>} . _xml_escape( $self->{launchd_label} ) . qq{</string>},
       qq{  <key>ProgramArguments</key>},
       qq{  <array>},
+      qq{    <string>} . _xml_escape( $self->{perl_bin} ) . qq{</string>},
       qq{    <string>} . _xml_escape( $self->{dashboard_bin} ) . qq{</string>},
       qq{    <string>restart</string>},
       qq{  </array>},
@@ -550,9 +553,86 @@ sub _is_macos {
 }
 
 sub _runtime_perl5lib {
-    return $ENV{PERL5LIB} if defined $ENV{PERL5LIB} && $ENV{PERL5LIB} ne q{};
-    my @inc = grep { defined && !ref } @INC;
-    return join q{:}, @inc;
+    my ($dashboard_bin) = @_;
+    my @paths;
+
+    push @paths, _dashboard_perl_lib_paths($dashboard_bin);
+
+    if ( defined $ENV{PERL5LIB} && $ENV{PERL5LIB} ne q{} ) {
+        push @paths, split /:/, $ENV{PERL5LIB};
+    }
+    else {
+        push @paths, grep { defined && !ref } @INC;
+    }
+
+    my %seen;
+    @paths = grep { defined && $_ ne q{} && !$seen{$_}++ } @paths;
+    return join q{:}, @paths;
+}
+
+sub _detect_dashboard_bin {
+    my ($home) = @_;
+    my @candidates = grep { defined && $_ ne q{} } (
+        _which('dashboard'),
+        ( defined $home && $home ne q{} ? File::Spec->catfile( $home, 'perl5', 'bin', 'dashboard' ) : () ),
+        ( defined $home && $home ne q{} ? File::Spec->catfile( $home, 'bin', 'dashboard' ) : () ),
+        '/usr/local/bin/dashboard',
+        '/usr/bin/dashboard',
+    );
+
+    my %seen;
+    for my $candidate (@candidates) {
+        next if $seen{$candidate}++;
+        return $candidate if -x $candidate;
+    }
+
+    return 'dashboard';
+}
+
+sub _detect_perl_bin {
+    my ($dashboard_bin) = @_;
+    my @candidates;
+
+    if ( defined $dashboard_bin && $dashboard_bin ne q{} && $dashboard_bin =~ m{/} ) {
+        my ( $volume, $directories ) = File::Spec->splitpath($dashboard_bin);
+        my $perl_sibling = File::Spec->catfile( $volume, $directories, 'perl' );
+        push @candidates, $perl_sibling;
+    }
+
+    push @candidates, grep { defined && $_ ne q{} } ( $^X, _which('perl') );
+
+    my %seen;
+    for my $candidate (@candidates) {
+        next if $seen{$candidate}++;
+        return $candidate if -x $candidate;
+    }
+
+    return 'perl';
+}
+
+sub _dashboard_perl_lib_paths {
+    my ($dashboard_bin) = @_;
+    return if !defined $dashboard_bin || $dashboard_bin eq q{};
+
+    my ( $volume, $directories ) = File::Spec->splitpath($dashboard_bin);
+    my @dirs = File::Spec->splitdir($directories);
+    pop @dirs if @dirs;
+
+    my $base = File::Spec->catdir( $volume, @dirs );
+    $base = abs_path($base) || $base;
+
+    my @candidates = (
+        File::Spec->catdir( $base, File::Spec->updir(), 'lib', 'perl5' ),
+        File::Spec->catdir( $base, File::Spec->updir(), 'lib' ),
+    );
+
+    my @paths;
+    for my $candidate (@candidates) {
+        my $resolved = abs_path($candidate) || $candidate;
+        push @paths, $resolved if -d $resolved;
+    }
+
+    return @paths;
 }
 
 sub _tail_combined_logs {

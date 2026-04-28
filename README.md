@@ -26,7 +26,7 @@ Without a managed startup unit, users have to remember to bring DD back with `da
 - on systemd hosts it writes a `.service` unit and manages it through `systemctl` and `journalctl`
 - on macOS it writes a launchd `.plist`, manages it through `launchctl`, and reads dedicated startup logs from `~/Library/Logs/`
 
-It also preserves the Perl runtime library path needed by the installed `dashboard` executable so the generated unit can start successfully under systemd even when the interactive shell normally provides that path.
+It also derives and preserves the Perl runtime library paths needed by the installed `dashboard` executable, including dashboard-adjacent directories such as sibling `lib/perl5`, and it runs `dashboard` through the active Perl interpreter captured at setup time so the generated startup definition can work outside an interactive shell.
 
 ## Developer Dashboard Feature Added
 
