@@ -92,6 +92,10 @@ dashboard ddstartup.remove -o json
 - `--system` forces system scope
 - `--user` forces user scope
 
+## Runtime Environment
+
+`ddstartup` writes the active DD Perl library path into the generated unit so `dashboard restart` can run under systemd without depending on shell-only `PERL5LIB` setup.
+
 ## Unit Paths
 
 - user scope: `~/.config/systemd/user/developer-dashboard-startup.service`

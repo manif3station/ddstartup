@@ -1,5 +1,9 @@
 Revision history for ddstartup
 
+0.03 2026-04-28
+    - fixed generated systemd units to preserve the active Perl runtime library path
+    - made dashboard ddstartup.setup derive PERL5LIB from the running Perl @INC when the environment variable is unset
+
 0.02 2026-04-28
     - changed ddstartup commands to print pretty table output by default
     - added -o json support across setup, enable, disable, status, logs, and remove

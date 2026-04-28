@@ -22,6 +22,8 @@ Without a managed startup unit, users have to remember to bring DD back with `da
 
 `ddstartup` writes a systemd unit that runs `dashboard restart`, enables that unit through `systemctl`, exposes a status view backed by `systemctl`, exposes a logs view backed by `journalctl`, and can disable and remove the unit again.
 
+It also preserves the Perl runtime library path needed by the installed `dashboard` executable so the generated unit can start successfully under systemd even when the interactive shell normally provides that path.
+
 ## Developer Dashboard Feature Added
 
 This skill adds:
@@ -233,3 +235,4 @@ See:
 - `docs/overview.md`
 - `docs/usage.md`
 - `docs/changes/2026-04-28-ddstartup-bootstrap.md`
+- `docs/changes/2026-04-28-runtime-env-fix.md`

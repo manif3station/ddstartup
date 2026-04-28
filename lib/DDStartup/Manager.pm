@@ -16,6 +16,7 @@ sub new {
         euid            => defined $args{euid} ? $args{euid} : ( defined $ENV{DDSTARTUP_EUID} ? $ENV{DDSTARTUP_EUID} : $> ),
         service_name    => $args{service_name} || 'developer-dashboard-startup.service',
         dashboard_bin   => exists $args{dashboard_bin} ? $args{dashboard_bin} : ( _which('dashboard') || 'dashboard' ),
+        perl5lib        => exists $args{perl5lib} ? $args{perl5lib} : _runtime_perl5lib(),
         systemctl_bin   => exists $args{systemctl_bin} ? $args{systemctl_bin} : ( $ENV{DDSTARTUP_SYSTEMCTL_BIN} || _which('systemctl') ),
         journalctl_bin  => exists $args{journalctl_bin} ? $args{journalctl_bin} : ( $ENV{DDSTARTUP_JOURNALCTL_BIN} || _which('journalctl') ),
         user_unit_dir   => exists $args{user_unit_dir} ? $args{user_unit_dir} : ( $ENV{DDSTARTUP_USER_UNIT_DIR} || File::Spec->catdir( $ENV{HOME} || q{}, '.config', 'systemd', 'user' ) ),
@@ -218,6 +219,7 @@ sub unit_text {
       'RemainAfterExit=yes',
       'WorkingDirectory=' . $self->{cwd},
       'Environment=HOME=' . $self->{home},
+      ( $self->{perl5lib} ne q{} ? ( 'Environment=PERL5LIB=' . $self->{perl5lib} ) : () ),
       'ExecStart=' . $self->{dashboard_bin} . ' restart',
       'ExecStop=' . $self->{dashboard_bin} . ' stop',
       'ExecReload=' . $self->{dashboard_bin} . ' restart',
@@ -258,6 +260,12 @@ sub _run_checked {
 sub _run_capture {
     my ( $self, @cmd ) = @_;
     return $self->{runner}->(@cmd);
+}
+
+sub _runtime_perl5lib {
+    return $ENV{PERL5LIB} if defined $ENV{PERL5LIB} && $ENV{PERL5LIB} ne q{};
+    my @inc = grep { defined && !ref } @INC;
+    return join q{:}, @inc;
 }
 
 sub _run {

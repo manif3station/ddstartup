@@ -20,6 +20,7 @@ my $manager = DDStartup::Manager->new(
     cwd            => $home,
     euid           => 1000,
     dashboard_bin  => '/usr/bin/dashboard',
+    perl5lib       => '/opt/dd/lib:/opt/perl5/lib/perl5',
     systemctl_bin  => '/usr/bin/systemctl',
     journalctl_bin => '/usr/bin/journalctl',
     user_unit_dir  => "$tmp/user-units",
@@ -76,6 +77,28 @@ close $ufh or die "Unable to close $setup->{unit_path}: $!";
 like( $unit, qr/\QExecStart=\/usr\/bin\/dashboard restart\E/, 'unit file starts DD through dashboard restart' );
 like( $unit, qr/\QExecStop=\/usr\/bin\/dashboard stop\E/, 'unit file stops DD through dashboard stop' );
 like( $unit, qr/\QWantedBy=default.target\E/, 'user scope unit uses default.target' );
+like( $unit, qr/\QEnvironment=PERL5LIB=\/opt\/dd\/lib:\/opt\/perl5\/lib\/perl5\E/, 'unit file preserves PERL5LIB when the runtime depends on it' );
+
+{
+    local $ENV{PERL5LIB};
+    local @INC = ( '/opt/dd/lib', '/opt/perl5/lib/perl5', @INC );
+    my $inc_manager = DDStartup::Manager->new(
+        home            => $home,
+        cwd             => $home,
+        euid            => 1000,
+        dashboard_bin   => '/usr/bin/dashboard',
+        systemctl_bin   => '/usr/bin/systemctl',
+        journalctl_bin  => '/usr/bin/journalctl',
+        user_unit_dir   => "$tmp/inc-user-units",
+        system_unit_dir => "$tmp/inc-system-units",
+        runner          => sub { return { exit => 0, stdout => "ok\n", stderr => q{} } },
+    );
+    like(
+        $inc_manager->unit_text('user'),
+        qr/\QEnvironment=PERL5LIB=\/opt\/dd\/lib:\/opt\/perl5\/lib\/perl5\E/,
+        'unit file falls back to runtime @INC when PERL5LIB is unset',
+    );
+}
 
 @calls = ();
 my $status = $manager->status();
