@@ -2,7 +2,7 @@
 
 ## Description
 
-`ddstartup` is a Developer Dashboard skill that installs and manages a systemd startup unit for Developer Dashboard so `dashboard restart` can be run automatically when the machine boots.
+`ddstartup` is a Developer Dashboard skill that installs and manages native startup definitions for Developer Dashboard so `dashboard restart` can be run automatically when the machine boots.
 
 ## Value
 
@@ -10,8 +10,9 @@ It gives the user a repeatable way to:
 
 - install DD startup at user scope when they manage DD in their own home runtime
 - install DD startup at system scope when root manages DD for the host
-- inspect the managed service state with `systemctl`
-- inspect the managed service logs with `journalctl`
+- use `systemctl` and `journalctl` on systemd hosts
+- use `launchctl` and launch agent or daemon plists on macOS
+- inspect macOS startup logs through dedicated files under `~/Library/Logs/`
 - remove the startup wiring cleanly when it is no longer wanted
 
 ## Problem It Solves
@@ -20,7 +21,10 @@ Without a managed startup unit, users have to remember to bring DD back with `da
 
 ## What It Does To Solve It
 
-`ddstartup` writes a systemd unit that runs `dashboard restart`, enables that unit through `systemctl`, exposes a status view backed by `systemctl`, exposes a logs view backed by `journalctl`, and can disable and remove the unit again.
+`ddstartup` writes the native startup definition for the current host:
+
+- on systemd hosts it writes a `.service` unit and manages it through `systemctl` and `journalctl`
+- on macOS it writes a launchd `.plist`, manages it through `launchctl`, and reads dedicated startup logs from `~/Library/Logs/`
 
 It also preserves the Perl runtime library path needed by the installed `dashboard` executable so the generated unit can start successfully under systemd even when the interactive shell normally provides that path.
 
@@ -59,7 +63,12 @@ Example:
 dashboard skills install git@github.com:manif3station/ddstartup.git
 ```
 
-When this skill is installed through `dashboard skills install`, its `Makefile` install target automatically provisions the startup unit on supported systemd hosts. On unsupported hosts such as macOS, install stays clean and skips the startup provisioning step instead of aborting the skill install.
+When this skill is installed through `dashboard skills install`, its `Makefile` install target automatically provisions startup on supported hosts:
+
+- systemd hosts get a managed `.service` unit
+- macOS hosts get a managed launchd `.plist`
+
+In non-GUI macOS sessions such as an SSH shell, launchd may defer immediate loading even though the plist is installed and enabled. In that case `ddstartup` reports `activation=deferred` during setup and `active=configured` in status.
 
 ## CLI Usage
 
@@ -97,12 +106,30 @@ Example setup result:
 ```text
 FIELD              VALUE
 -----------------  -----
+platform           systemd
 scope              user
 service_name       developer-dashboard-startup.service
 unit_path          ~/.config/systemd/user/developer-dashboard-startup.service
 dashboard          /usr/bin/dashboard
 working_directory  ~
 wanted_by          default.target
+```
+
+Example macOS setup result from a non-GUI shell:
+
+```text
+FIELD              VALUE
+-----------------  -----
+platform           macos
+scope              user
+service_name       developer-dashboard-startup
+unit_path          ~/Library/LaunchAgents/developer-dashboard-startup.plist
+dashboard          /usr/bin/dashboard
+working_directory  ~
+wanted_by          launchd
+domain             user/<uid>
+log_path           ~/Library/Logs/developer-dashboard-startup.log
+activation         deferred
 ```
 
 JSON form:
@@ -122,11 +149,27 @@ Example status result:
 ```text
 FIELD         VALUE
 ------------  -----
+platform      systemd
 scope         user
 service_name  developer-dashboard-startup.service
 unit_path     ~/.config/systemd/user/developer-dashboard-startup.service
 enabled       enabled
 active        active
+```
+
+Example macOS status result from an SSH shell:
+
+```text
+FIELD         VALUE
+------------  -----
+platform      macos
+scope         user
+service_name  developer-dashboard-startup
+unit_path     ~/Library/LaunchAgents/developer-dashboard-startup.plist
+domain        user/<uid>
+log_path      ~/Library/Logs/developer-dashboard-startup.log
+enabled       enabled
+active        configured
 ```
 
 Read recent logs:
@@ -135,7 +178,7 @@ Read recent logs:
 dashboard ddstartup.logs
 ```
 
-Default logs output is a table that includes the scope, unit name, requested line count, and the returned journal content.
+Default logs output is a table that includes the platform, scope, service name, requested line count, and the returned log content.
 
 Read a shorter log window:
 
@@ -179,13 +222,21 @@ This skill does not add a browser interface. It is a CLI-only operational skill.
 
 ## Practical Examples
 
-Normal case, install DD startup for a user-managed home runtime:
+Normal case, install DD startup for a user-managed home runtime on Linux:
 
 ```bash
 dashboard skills install git@github.com:manif3station/ddstartup.git
 ```
 
 That install path automatically provisions the startup unit.
+
+Normal case, install DD startup for a macOS user runtime:
+
+```bash
+dashboard skills install git@github.com:manif3station/ddstartup.git
+```
+
+That install path writes `~/Library/LaunchAgents/developer-dashboard-startup.plist`.
 
 Normal case, inspect whether the unit is enabled and active:
 
@@ -199,7 +250,13 @@ Normal case, script against the same command:
 dashboard ddstartup.status -o json
 ```
 
-Normal case, inspect the latest service output:
+Normal case, inspect the latest service output on systemd:
+
+```bash
+dashboard ddstartup.logs --lines 50
+```
+
+Normal case, inspect the latest startup log file on macOS through the same command:
 
 ```bash
 dashboard ddstartup.logs --lines 50
@@ -221,9 +278,10 @@ dashboard skills uninstall ddstartup
 
 ## Edge Cases
 
-- if `systemctl` is not available, setup and status commands fail with a clear error
-- if `journalctl` is not available, logs fail with a clear error
-- if the skill is installed on a non-systemd host, the install step succeeds but skips auto-setup because the current release only supports `systemctl` and `journalctl`
+- if `systemctl` is not available on a systemd-targeted host, setup and status commands fail with a clear error
+- if `journalctl` is not available on a systemd-targeted host, logs fail with a clear error
+- if `launchctl` can enable the launch agent but the current macOS shell cannot load it immediately, setup still writes and enables the plist and reports `activation=deferred`
+- if macOS status is read from a shell that cannot show the launchd job as live, `active` is reported as `configured` instead of `active`
 - if a non-root user needs a system unit, they must run setup with the privileges required by systemd and the target unit directory
 - if root runs setup without flags, the skill defaults to system scope
 - if a normal user runs setup without flags, the skill defaults to user scope
@@ -234,6 +292,7 @@ See:
 
 - `docs/overview.md`
 - `docs/usage.md`
+- `docs/changes/2026-04-28-macos-launchd-support.md`
 - `docs/changes/2026-04-28-ddstartup-bootstrap.md`
 - `docs/changes/2026-04-28-runtime-env-fix.md`
 - `docs/changes/2026-04-28-install-skip-on-unsupported-hosts.md`

@@ -6,7 +6,12 @@
 dashboard skills install git@github.com:manif3station/ddstartup.git
 ```
 
-On supported systemd hosts, install auto-provisions the startup unit. On unsupported hosts such as macOS, install completes but skips startup provisioning.
+Install auto-provisions startup on supported hosts:
+
+- systemd hosts get a `.service` unit
+- macOS hosts get a launchd `.plist`
+
+In non-GUI macOS sessions such as SSH shells, install and setup can report deferred activation while still writing and enabling the launch agent.
 
 ## Commands
 
@@ -98,14 +103,30 @@ dashboard ddstartup.remove -o json
 
 `ddstartup` writes the active DD Perl library path into the generated unit so `dashboard restart` can run under systemd without depending on shell-only `PERL5LIB` setup.
 
+On macOS, the generated plist carries the same `HOME` and `PERL5LIB` information through launchd `EnvironmentVariables`.
+
 ## Unit Paths
 
 - user scope: `~/.config/systemd/user/developer-dashboard-startup.service`
 - system scope: `/etc/systemd/system/developer-dashboard-startup.service`
 
+## macOS Paths
+
+- user scope: `~/Library/LaunchAgents/developer-dashboard-startup.plist`
+- system scope: `/Library/LaunchDaemons/developer-dashboard-startup.plist`
+- user logs: `~/Library/Logs/developer-dashboard-startup.log`
+- user stderr logs: `~/Library/Logs/developer-dashboard-startup.err.log`
+
+## macOS Status Semantics
+
+- `enabled` means the launchd label is enabled in the user or system domain
+- `active=active` means the current session can prove the launchd job is loaded
+- `active=configured` means the plist is installed and enabled but the current shell did not prove a live loaded job
+- `activation=deferred` from setup means the plist was written and enabled but immediate loading was not proven in the current session
+
 ## Edge Cases
 
-- if `systemctl` is missing, setup, status, and remove fail
-- if `journalctl` is missing, logs fail
-- if the skill is installed on a non-systemd host, the install-time Makefile target skips auto-setup because this release only supports `systemctl` and `journalctl`
-- if the host is not systemd-based, this skill is not the right startup manager yet
+- if `systemctl` is missing on a systemd-targeted host, setup, status, and remove fail
+- if `journalctl` is missing on a systemd-targeted host, logs fail
+- if `launchctl` can enable the launch agent but the current macOS shell cannot load it immediately, setup reports deferred activation instead of failing
+- if the host is neither systemd-based nor macOS, install-time auto-setup skips that host because there is no supported startup backend yet

@@ -10,18 +10,46 @@ use JSON::PP qw(encode_json);
 
 sub new {
     my ( $class, %args ) = @_;
+    my $systemd_service_name = exists $args{service_name}
+      ? $args{service_name}
+      : ( $args{systemd_service_name} || 'developer-dashboard-startup.service' );
+    my $launchd_label = $args{launchd_label} || _strip_service_suffix($systemd_service_name);
+    my $osname = exists $args{osname} ? $args{osname} : ( $ENV{DDSTARTUP_OSNAME} || $^O );
+    my $home = exists $args{home} ? $args{home} : ( $ENV{HOME} || q{} );
+    my $cwd = exists $args{cwd} ? $args{cwd} : ( $args{home} || $ENV{HOME} || getcwd() );
+    my $euid = defined $args{euid} ? $args{euid} : ( defined $ENV{DDSTARTUP_EUID} ? $ENV{DDSTARTUP_EUID} : $> );
+    my $dashboard_bin = exists $args{dashboard_bin} ? $args{dashboard_bin} : ( _which('dashboard') || 'dashboard' );
+    my $perl5lib = exists $args{perl5lib} ? $args{perl5lib} : _runtime_perl5lib();
+    my $systemctl_bin = exists $args{systemctl_bin} ? $args{systemctl_bin} : ( $ENV{DDSTARTUP_SYSTEMCTL_BIN} || _which('systemctl') );
+    my $journalctl_bin = exists $args{journalctl_bin} ? $args{journalctl_bin} : ( $ENV{DDSTARTUP_JOURNALCTL_BIN} || _which('journalctl') );
+    my $launchctl_bin = exists $args{launchctl_bin} ? $args{launchctl_bin} : ( $ENV{DDSTARTUP_LAUNCHCTL_BIN} || _which('launchctl') );
+    my $user_unit_dir = exists $args{user_unit_dir} ? $args{user_unit_dir} : ( $ENV{DDSTARTUP_USER_UNIT_DIR} || File::Spec->catdir( $ENV{HOME} || q{}, '.config', 'systemd', 'user' ) );
+    my $system_unit_dir = exists $args{system_unit_dir} ? $args{system_unit_dir} : ( $ENV{DDSTARTUP_SYSTEM_UNIT_DIR} || File::Spec->catdir( File::Spec->rootdir(), 'etc', 'systemd', 'system' ) );
+    my $user_launch_agents_dir = exists $args{user_launch_agents_dir} ? $args{user_launch_agents_dir} : ( $ENV{DDSTARTUP_USER_LAUNCH_AGENTS_DIR} || File::Spec->catdir( $ENV{HOME} || q{}, 'Library', 'LaunchAgents' ) );
+    my $system_launch_daemons_dir = exists $args{system_launch_daemons_dir} ? $args{system_launch_daemons_dir} : ( $ENV{DDSTARTUP_SYSTEM_LAUNCH_DAEMONS_DIR} || File::Spec->catdir( File::Spec->rootdir(), 'Library', 'LaunchDaemons' ) );
+    my $user_logs_dir = exists $args{user_logs_dir} ? $args{user_logs_dir} : ( $ENV{DDSTARTUP_USER_LOGS_DIR} || File::Spec->catdir( $ENV{HOME} || q{}, 'Library', 'Logs' ) );
+    my $system_logs_dir = exists $args{system_logs_dir} ? $args{system_logs_dir} : ( $ENV{DDSTARTUP_SYSTEM_LOGS_DIR} || File::Spec->catdir( File::Spec->rootdir(), 'Library', 'Logs' ) );
+    my $runner = $args{runner} || \&_run;
+
     my $self = bless {
-        home            => exists $args{home} ? $args{home} : ( $ENV{HOME} || q{} ),
-        cwd             => exists $args{cwd} ? $args{cwd} : ( $args{home} || $ENV{HOME} || getcwd() ),
-        euid            => defined $args{euid} ? $args{euid} : ( defined $ENV{DDSTARTUP_EUID} ? $ENV{DDSTARTUP_EUID} : $> ),
-        service_name    => $args{service_name} || 'developer-dashboard-startup.service',
-        dashboard_bin   => exists $args{dashboard_bin} ? $args{dashboard_bin} : ( _which('dashboard') || 'dashboard' ),
-        perl5lib        => exists $args{perl5lib} ? $args{perl5lib} : _runtime_perl5lib(),
-        systemctl_bin   => exists $args{systemctl_bin} ? $args{systemctl_bin} : ( $ENV{DDSTARTUP_SYSTEMCTL_BIN} || _which('systemctl') ),
-        journalctl_bin  => exists $args{journalctl_bin} ? $args{journalctl_bin} : ( $ENV{DDSTARTUP_JOURNALCTL_BIN} || _which('journalctl') ),
-        user_unit_dir   => exists $args{user_unit_dir} ? $args{user_unit_dir} : ( $ENV{DDSTARTUP_USER_UNIT_DIR} || File::Spec->catdir( $ENV{HOME} || q{}, '.config', 'systemd', 'user' ) ),
-        system_unit_dir => exists $args{system_unit_dir} ? $args{system_unit_dir} : ( $ENV{DDSTARTUP_SYSTEM_UNIT_DIR} || File::Spec->catdir( File::Spec->rootdir(), 'etc', 'systemd', 'system' ) ),
-        runner          => $args{runner} || \&_run,
+        osname                    => $osname,
+        home                      => $home,
+        cwd                       => $cwd,
+        euid                      => $euid,
+        systemd_service_name      => $systemd_service_name,
+        launchd_label             => $launchd_label,
+        dashboard_bin             => $dashboard_bin,
+        perl5lib                  => $perl5lib,
+        systemctl_bin             => $systemctl_bin,
+        journalctl_bin            => $journalctl_bin,
+        launchctl_bin             => $launchctl_bin,
+        user_unit_dir             => $user_unit_dir,
+        system_unit_dir           => $system_unit_dir,
+        user_launch_agents_dir    => $user_launch_agents_dir,
+        system_launch_daemons_dir => $system_launch_daemons_dir,
+        user_logs_dir             => $user_logs_dir,
+        system_logs_dir           => $system_logs_dir,
+        runner                    => $runner,
     }, $class;
     return $self;
 }
@@ -35,21 +63,8 @@ sub scope_from_args {
 
 sub setup {
     my ( $self, @args ) = @_;
-    $self->_require_tool('systemctl');
-    my $scope = $self->scope_from_args(@args);
-    my $unit_path = $self->unit_path($scope);
-    make_path( $self->unit_dir($scope) );
-    _write_file( $unit_path, $self->unit_text($scope) );
-    $self->_run_checked( $self->_systemctl_command( $scope, 'daemon-reload' ) );
-    $self->_run_checked( $self->_systemctl_command( $scope, 'enable', '--now', $self->{service_name} ) );
-    return {
-        scope             => $scope,
-        service_name      => $self->{service_name},
-        unit_path         => $unit_path,
-        dashboard         => $self->{dashboard_bin},
-        working_directory => $self->{cwd},
-        wanted_by         => $scope eq 'system' ? 'multi-user.target' : 'default.target',
-    };
+    return $self->_setup_launchd(@args) if $self->_is_macos;
+    return $self->_setup_systemd(@args);
 }
 
 sub enable {
@@ -62,15 +77,17 @@ sub auto_setup {
     my $scope = $self->scope_from_args(@args);
     my $unit_path = $self->unit_path($scope);
     return {
+        platform     => $self->platform,
         scope        => $scope,
-        service_name => $self->{service_name},
+        service_name => $self->service_name($scope),
         unit_path    => $unit_path,
         skipped      => 1,
         reason       => 'unit_exists',
     } if -e $unit_path;
     return {
+        platform     => $self->platform,
         scope        => $scope,
-        service_name => $self->{service_name},
+        service_name => $self->service_name($scope),
         unit_path    => $unit_path,
         skipped      => 1,
         reason       => 'unsupported_host',
@@ -80,56 +97,26 @@ sub auto_setup {
 
 sub status {
     my ( $self, @args ) = @_;
-    $self->_require_tool('systemctl');
-    my $scope = $self->scope_from_args(@args);
-    return {
-        scope        => $scope,
-        service_name => $self->{service_name},
-        unit_path    => $self->unit_path($scope),
-        enabled      => _trim( $self->_run_capture( $self->_systemctl_command( $scope, 'is-enabled', $self->{service_name} ) )->{stdout} ),
-        active       => _trim( $self->_run_capture( $self->_systemctl_command( $scope, 'is-active',  $self->{service_name} ) )->{stdout} ),
-    };
+    return $self->_status_launchd(@args) if $self->_is_macos;
+    return $self->_status_systemd(@args);
 }
 
 sub logs {
     my ( $self, %args ) = @_;
-    $self->_require_tool('journalctl');
-    my $scope = $self->scope_from_args( @{ $args{argv} || [] } );
-    my $lines = $args{lines} || 50;
-    return $self->_run_checked(
-        $self->_journalctl_command( $scope, '-u', $self->{service_name}, '--no-pager', '-n', $lines )
-    )->{stdout};
+    return $self->_logs_launchd(%args) if $self->_is_macos;
+    return $self->_logs_systemd(%args);
 }
 
 sub disable {
     my ( $self, @args ) = @_;
-    $self->_require_tool('systemctl');
-    my $scope = $self->scope_from_args(@args);
-    my $unit_path = $self->unit_path($scope);
-    $self->_run_checked( $self->_systemctl_command( $scope, 'disable', '--now', $self->{service_name} ) );
-    return {
-        scope        => $scope,
-        service_name => $self->{service_name},
-        unit_path    => $unit_path,
-        disabled     => 1,
-        removed      => 0,
-    };
+    return $self->_disable_launchd(@args) if $self->_is_macos;
+    return $self->_disable_systemd(@args);
 }
 
 sub remove {
     my ( $self, @args ) = @_;
-    $self->_require_tool('systemctl');
-    my $scope = $self->scope_from_args(@args);
-    my $unit_path = $self->unit_path($scope);
-    $self->_run_checked( $self->_systemctl_command( $scope, 'disable', '--now', $self->{service_name} ) );
-    unlink $unit_path if -e $unit_path;
-    $self->_run_checked( $self->_systemctl_command( $scope, 'daemon-reload' ) );
-    return {
-        scope        => $scope,
-        service_name => $self->{service_name},
-        unit_path    => $unit_path,
-        removed      => -e $unit_path ? 0 : 1,
-    };
+    return $self->_remove_launchd(@args) if $self->_is_macos;
+    return $self->_remove_systemd(@args);
 }
 
 sub parse_common_argv {
@@ -163,7 +150,10 @@ sub render_result {
 
 sub format_kv_table {
     my ( $self, $data ) = @_;
-    my @keys = grep { exists $data->{$_} } qw(scope service_name unit_path dashboard working_directory wanted_by enabled active disabled removed skipped reason);
+    my @preferred = qw(platform scope service_name unit_path dashboard working_directory wanted_by domain log_path activation enabled active disabled removed skipped reason);
+    my %seen;
+    my @keys = grep { exists $data->{$_} && !$seen{$_}++ } @preferred;
+    push @keys, grep { !$seen{$_}++ } sort keys %{$data};
     my $width = 5;
     for my $key (@keys) {
         $width = length($key) if length($key) > $width;
@@ -186,6 +176,7 @@ sub format_logs_table {
     my @lines = split /\n/, $logs;
     @lines = ('') if !@lines;
     my @rows = (
+        [ platform     => $data->{platform} ],
         [ scope        => $data->{scope} ],
         [ service_name => $data->{service_name} ],
         [ lines        => $data->{lines} ],
@@ -193,6 +184,7 @@ sub format_logs_table {
     );
     push @rows, map { [ q{}, $_ ] } @lines if @lines;
     my $width = length('service_name');
+    $width = length('platform') if length('platform') > $width;
     my $text = sprintf "%-*s  %s\n", $width, 'FIELD', 'VALUE';
     $text .= sprintf "%-*s  %s\n", $width, '-' x $width, '-' x 5;
     for my $row (@rows) {
@@ -203,17 +195,211 @@ sub format_logs_table {
     return $text;
 }
 
+sub platform {
+    my ($self) = @_;
+    return $self->_is_macos ? 'macos' : 'systemd';
+}
+
+sub service_name {
+    my ( $self, $scope ) = @_;
+    return $self->_is_macos ? $self->{launchd_label} : $self->{systemd_service_name};
+}
+
 sub unit_dir {
     my ( $self, $scope ) = @_;
+    if ( $self->_is_macos ) {
+        return $scope eq 'system' ? $self->{system_launch_daemons_dir} : $self->{user_launch_agents_dir};
+    }
     return $scope eq 'system' ? $self->{system_unit_dir} : $self->{user_unit_dir};
 }
 
 sub unit_path {
     my ( $self, $scope ) = @_;
-    return File::Spec->catfile( $self->unit_dir($scope), $self->{service_name} );
+    my $name = $self->_is_macos ? $self->{launchd_label} . '.plist' : $self->{systemd_service_name};
+    return File::Spec->catfile( $self->unit_dir($scope), $name );
 }
 
 sub unit_text {
+    my ( $self, $scope ) = @_;
+    return $self->_plist_text($scope) if $self->_is_macos;
+    return $self->_unit_text_systemd($scope);
+}
+
+sub _setup_systemd {
+    my ( $self, @args ) = @_;
+    $self->_require_tool('systemctl');
+    my $scope = $self->scope_from_args(@args);
+    my $unit_path = $self->unit_path($scope);
+    make_path( $self->unit_dir($scope) );
+    _write_file( $unit_path, $self->unit_text($scope) );
+    $self->_run_checked( $self->_systemctl_command( $scope, 'daemon-reload' ) );
+    $self->_run_checked( $self->_systemctl_command( $scope, 'enable', '--now', $self->{systemd_service_name} ) );
+    return {
+        platform          => $self->platform,
+        scope             => $scope,
+        service_name      => $self->{systemd_service_name},
+        unit_path         => $unit_path,
+        dashboard         => $self->{dashboard_bin},
+        working_directory => $self->{cwd},
+        wanted_by         => $scope eq 'system' ? 'multi-user.target' : 'default.target',
+    };
+}
+
+sub _setup_launchd {
+    my ( $self, @args ) = @_;
+    $self->_require_tool('launchctl');
+    my $scope = $self->scope_from_args(@args);
+    my $unit_path = $self->unit_path($scope);
+    make_path( $self->unit_dir($scope), $self->_logs_dir($scope) );
+    _write_file( $unit_path, $self->unit_text($scope) );
+    my $domain = $self->_launchd_domain($scope);
+    my $service_target = $self->_launchd_service_target($scope);
+    $self->_run_checked( $self->_launchctl_command( 'enable', $service_target ) );
+    my $load = $self->_run_capture( $self->_launchctl_command( 'load', '-w', $unit_path ) );
+    return {
+        platform          => $self->platform,
+        scope             => $scope,
+        service_name      => $self->{launchd_label},
+        unit_path         => $unit_path,
+        dashboard         => $self->{dashboard_bin},
+        working_directory => $self->{cwd},
+        wanted_by         => 'launchd',
+        domain            => $domain,
+        log_path          => $self->_logs_path($scope),
+        activation        => $load->{exit} ? 'deferred' : 'loaded',
+    };
+}
+
+sub _status_systemd {
+    my ( $self, @args ) = @_;
+    $self->_require_tool('systemctl');
+    my $scope = $self->scope_from_args(@args);
+    return {
+        platform     => $self->platform,
+        scope        => $scope,
+        service_name => $self->{systemd_service_name},
+        unit_path    => $self->unit_path($scope),
+        enabled      => _trim( $self->_run_capture( $self->_systemctl_command( $scope, 'is-enabled', $self->{systemd_service_name} ) )->{stdout} ),
+        active       => _trim( $self->_run_capture( $self->_systemctl_command( $scope, 'is-active', $self->{systemd_service_name} ) )->{stdout} ),
+    };
+}
+
+sub _status_launchd {
+    my ( $self, @args ) = @_;
+    $self->_require_tool('launchctl');
+    my $scope = $self->scope_from_args(@args);
+    my $domain = $self->_launchd_domain($scope);
+    my $disabled_domain = $self->_launchd_disabled_domain($scope);
+    my $disabled = $self->_run_checked( $self->_launchctl_command( 'print-disabled', $disabled_domain ) )->{stdout};
+    my $enabled = $disabled =~ /\Q"$self->{launchd_label}"\E\s*=>\s*disabled/ ? 'disabled' : 'enabled';
+    my $active = 'inactive';
+    if ( $enabled eq 'enabled' && -e $self->unit_path($scope) ) {
+        my $list = $self->_run_capture( $self->_launchctl_command( 'list', $self->{launchd_label} ) );
+        $active = ( !$list->{exit} && $list->{stdout} !~ /Could not find service/ ) ? 'active' : 'configured';
+    }
+    return {
+        platform     => $self->platform,
+        scope        => $scope,
+        service_name => $self->{launchd_label},
+        unit_path    => $self->unit_path($scope),
+        domain       => $domain,
+        enabled      => $enabled,
+        active       => $active,
+        log_path     => $self->_logs_path($scope),
+    };
+}
+
+sub _logs_systemd {
+    my ( $self, %args ) = @_;
+    $self->_require_tool('journalctl');
+    my $scope = $self->scope_from_args( @{ $args{argv} || [] } );
+    my $lines = $args{lines} || 50;
+    return $self->_run_checked(
+        $self->_journalctl_command( $scope, '-u', $self->{systemd_service_name}, '--no-pager', '-n', $lines )
+    )->{stdout};
+}
+
+sub _logs_launchd {
+    my ( $self, %args ) = @_;
+    my $scope = $self->scope_from_args( @{ $args{argv} || [] } );
+    my $lines = $args{lines} || 50;
+    return _tail_combined_logs( $self->_logs_path($scope), $self->_err_logs_path($scope), $lines );
+}
+
+sub _disable_systemd {
+    my ( $self, @args ) = @_;
+    $self->_require_tool('systemctl');
+    my $scope = $self->scope_from_args(@args);
+    my $unit_path = $self->unit_path($scope);
+    $self->_run_checked( $self->_systemctl_command( $scope, 'disable', '--now', $self->{systemd_service_name} ) );
+    return {
+        platform     => $self->platform,
+        scope        => $scope,
+        service_name => $self->{systemd_service_name},
+        unit_path    => $unit_path,
+        disabled     => 1,
+        removed      => 0,
+    };
+}
+
+sub _disable_launchd {
+    my ( $self, @args ) = @_;
+    $self->_require_tool('launchctl');
+    my $scope = $self->scope_from_args(@args);
+    my $unit_path = $self->unit_path($scope);
+    my $domain = $self->_launchd_domain($scope);
+    my $service_target = $self->_launchd_service_target($scope);
+    $self->_run_capture( $self->_launchctl_command( 'unload', '-w', $unit_path ) );
+    $self->_run_checked( $self->_launchctl_command( 'disable', $service_target ) );
+    return {
+        platform     => $self->platform,
+        scope        => $scope,
+        service_name => $self->{launchd_label},
+        unit_path    => $unit_path,
+        domain       => $domain,
+        disabled     => 1,
+        removed      => 0,
+    };
+}
+
+sub _remove_systemd {
+    my ( $self, @args ) = @_;
+    $self->_require_tool('systemctl');
+    my $scope = $self->scope_from_args(@args);
+    my $unit_path = $self->unit_path($scope);
+    $self->_run_checked( $self->_systemctl_command( $scope, 'disable', '--now', $self->{systemd_service_name} ) );
+    unlink $unit_path if -e $unit_path;
+    $self->_run_checked( $self->_systemctl_command( $scope, 'daemon-reload' ) );
+    return {
+        platform     => $self->platform,
+        scope        => $scope,
+        service_name => $self->{systemd_service_name},
+        unit_path    => $unit_path,
+        removed      => -e $unit_path ? 0 : 1,
+    };
+}
+
+sub _remove_launchd {
+    my ( $self, @args ) = @_;
+    $self->_require_tool('launchctl');
+    my $scope = $self->scope_from_args(@args);
+    my $unit_path = $self->unit_path($scope);
+    my $domain = $self->_launchd_domain($scope);
+    my $service_target = $self->_launchd_service_target($scope);
+    $self->_run_capture( $self->_launchctl_command( 'unload', '-w', $unit_path ) );
+    $self->_run_capture( $self->_launchctl_command( 'disable', $service_target ) );
+    unlink $unit_path if -e $unit_path;
+    return {
+        platform     => $self->platform,
+        scope        => $scope,
+        service_name => $self->{launchd_label},
+        unit_path    => $unit_path,
+        domain       => $domain,
+        removed      => -e $unit_path ? 0 : 1,
+    };
+}
+
+sub _unit_text_systemd {
     my ( $self, $scope ) = @_;
     my $wanted_by = $scope eq 'system' ? 'multi-user.target' : 'default.target';
     return join "\n",
@@ -236,6 +422,47 @@ sub unit_text {
       q{};
 }
 
+sub _plist_text {
+    my ( $self, $scope ) = @_;
+    my @env_lines = (
+        '    <key>HOME</key>',
+        '    <string>' . _xml_escape( $self->{home} ) . '</string>',
+    );
+    if ( $self->{perl5lib} ne q{} ) {
+        push @env_lines,
+          '    <key>PERL5LIB</key>',
+          '    <string>' . _xml_escape( $self->{perl5lib} ) . '</string>';
+    }
+
+    return join "\n",
+      qq{<?xml version="1.0" encoding="UTF-8"?>},
+      qq{<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">},
+      qq{<plist version="1.0">},
+      qq{<dict>},
+      qq{  <key>Label</key>},
+      qq{  <string>} . _xml_escape( $self->{launchd_label} ) . qq{</string>},
+      qq{  <key>ProgramArguments</key>},
+      qq{  <array>},
+      qq{    <string>} . _xml_escape( $self->{dashboard_bin} ) . qq{</string>},
+      qq{    <string>restart</string>},
+      qq{  </array>},
+      qq{  <key>WorkingDirectory</key>},
+      qq{  <string>} . _xml_escape( $self->{cwd} ) . qq{</string>},
+      qq{  <key>EnvironmentVariables</key>},
+      qq{  <dict>},
+      @env_lines,
+      qq{  </dict>},
+      qq{  <key>RunAtLoad</key>},
+      qq{  <true/>},
+      qq{  <key>StandardOutPath</key>},
+      qq{  <string>} . _xml_escape( $self->_logs_path($scope) ) . qq{</string>},
+      qq{  <key>StandardErrorPath</key>},
+      qq{  <string>} . _xml_escape( $self->_err_logs_path($scope) ) . qq{</string>},
+      qq{</dict>},
+      qq{</plist>},
+      q{};
+}
+
 sub _systemctl_command {
     my ( $self, $scope, @rest ) = @_;
     return $scope eq 'system'
@@ -250,9 +477,51 @@ sub _journalctl_command {
       : ( $self->{journalctl_bin}, '--user', @rest );
 }
 
+sub _launchctl_command {
+    my ( $self, @rest ) = @_;
+    return ( $self->{launchctl_bin}, @rest );
+}
+
+sub _launchd_domain {
+    my ( $self, $scope ) = @_;
+    return $scope eq 'system' ? 'system' : 'user/' . $self->{euid};
+}
+
+sub _launchd_disabled_domain {
+    my ( $self, $scope ) = @_;
+    return $scope eq 'system' ? 'system' : 'user/' . $self->{euid};
+}
+
+sub _launchd_service_target {
+    my ( $self, $scope ) = @_;
+    return $scope eq 'system'
+      ? 'system/' . $self->{launchd_label}
+      : 'user/' . $self->{euid} . '/' . $self->{launchd_label};
+}
+
+sub _logs_dir {
+    my ( $self, $scope ) = @_;
+    return $scope eq 'system' ? $self->{system_logs_dir} : $self->{user_logs_dir};
+}
+
+sub _logs_path {
+    my ( $self, $scope ) = @_;
+    return File::Spec->catfile( $self->_logs_dir($scope), $self->{launchd_label} . '.log' );
+}
+
+sub _err_logs_path {
+    my ( $self, $scope ) = @_;
+    return File::Spec->catfile( $self->_logs_dir($scope), $self->{launchd_label} . '.err.log' );
+}
+
 sub _require_tool {
     my ( $self, $tool ) = @_;
-    my $path = $tool eq 'systemctl' ? $self->{systemctl_bin} : $self->{journalctl_bin};
+    my %map = (
+        systemctl  => $self->{systemctl_bin},
+        journalctl => $self->{journalctl_bin},
+        launchctl  => $self->{launchctl_bin},
+    );
+    my $path = $map{$tool};
     die "$tool is required for ddstartup\n" if !$path;
     return $path;
 }
@@ -271,13 +540,29 @@ sub _run_capture {
 
 sub _auto_setup_supported {
     my ($self) = @_;
+    return _command_exists( $self->{launchctl_bin} ) if $self->_is_macos;
     return _command_exists( $self->{systemctl_bin} );
+}
+
+sub _is_macos {
+    my ($self) = @_;
+    return $self->{osname} eq 'darwin';
 }
 
 sub _runtime_perl5lib {
     return $ENV{PERL5LIB} if defined $ENV{PERL5LIB} && $ENV{PERL5LIB} ne q{};
     my @inc = grep { defined && !ref } @INC;
     return join q{:}, @inc;
+}
+
+sub _tail_combined_logs {
+    my ( $stdout_path, $stderr_path, $lines ) = @_;
+    my @entries;
+    push @entries, split /\n/, _slurp($stdout_path);
+    push @entries, split /\n/, _slurp($stderr_path);
+    @entries = grep { defined && $_ ne q{} } @entries;
+    @entries = @entries > $lines ? @entries[ -$lines .. -1 ] : @entries if $lines;
+    return @entries ? join( "\n", @entries ) . "\n" : q{};
 }
 
 sub _run {
@@ -314,6 +599,16 @@ sub _write_file {
     return 1;
 }
 
+sub _slurp {
+    my ($path) = @_;
+    return q{} if !defined $path || !-e $path;
+    open my $fh, '<', $path or die "Unable to read $path: $!";
+    local $/;
+    my $content = <$fh>;
+    close $fh or die "Unable to close $path: $!";
+    return defined $content ? $content : q{};
+}
+
 sub _which {
     my ($name) = @_;
     return if !$name;
@@ -329,6 +624,23 @@ sub _command_exists {
     return 0 if !$name;
     return -x $name ? 1 : 0 if $name =~ m{/};
     return defined _which($name) ? 1 : 0;
+}
+
+sub _strip_service_suffix {
+    my ($name) = @_;
+    $name =~ s/\.service\z// if defined $name;
+    return $name;
+}
+
+sub _xml_escape {
+    my ($value) = @_;
+    $value = q{} if !defined $value;
+    $value =~ s/&/&amp;/g;
+    $value =~ s/</&lt;/g;
+    $value =~ s/>/&gt;/g;
+    $value =~ s/"/&quot;/g;
+    $value =~ s/'/&apos;/g;
+    return $value;
 }
 
 1;

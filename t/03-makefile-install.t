@@ -63,6 +63,52 @@ my $unsupported_install = qx{PATH="$unsupported_bin:$ENV{PATH}" HOME="$unsupport
 is( $? >> 8, 0, 'make install stays clean on unsupported hosts' );
 ok( !-f "$unsupported_units/developer-dashboard-startup.service", 'unsupported-host install skips unit creation' );
 
+my $mac_tmp = tempdir( CLEANUP => 1 );
+my $mac_bin = "$mac_tmp/bin";
+my $mac_home = "$mac_tmp/home";
+my $mac_agents = "$mac_tmp/LaunchAgents";
+my $mac_logs = "$mac_tmp/Logs";
+my $mac_calls_log = "$mac_tmp/launchctl.log";
+my $mac_state_dir = "$mac_tmp/state";
+make_path( $mac_bin, $mac_home, $mac_agents, $mac_logs, $mac_state_dir );
+
+_write_executable(
+    "$mac_bin/launchctl",
+    <<"EOF",
+#!/bin/sh
+printf '%s\\n' "\$*" >>"$mac_calls_log"
+loaded="$mac_state_dir/loaded"
+case "\$1" in
+  enable)
+    exit 0
+    ;;
+  load)
+    : >"\$loaded"
+    exit 0
+    ;;
+  print-disabled)
+    printf '\\tdisabled services = {\\n\\t}\\n'
+    exit 0
+    ;;
+esac
+exit 0
+EOF
+);
+_write_executable(
+    "$mac_bin/dashboard",
+    "#!/bin/sh\nexit 0\n",
+);
+
+my $mac_install = qx{PATH="$mac_bin:$ENV{PATH}" HOME="$mac_home" DDSTARTUP_OSNAME=darwin DDSTARTUP_USER_LAUNCH_AGENTS_DIR="$mac_agents" DDSTARTUP_USER_LOGS_DIR="$mac_logs" DDSTARTUP_EUID=501 make install};
+is( $? >> 8, 0, 'make install provisions launchd startup on macOS hosts' );
+ok( -f "$mac_agents/developer-dashboard-startup.plist", 'mac make install writes the launch agent plist' );
+
+open my $mfh, '<', $mac_calls_log or die "Unable to read $mac_calls_log: $!";
+my $mac_calls = do { local $/; <$mfh> };
+close $mfh or die "Unable to close $mac_calls_log: $!";
+like( $mac_calls, qr/\Qenable user\/501\/developer-dashboard-startup\E/, 'mac make install enables the launchd label' );
+like( $mac_calls, qr/\Qload -w \E/, 'mac make install loads the launch agent plist' );
+
 done_testing();
 
 sub _write_executable {

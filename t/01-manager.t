@@ -256,6 +256,144 @@ _write_executable(
     is( $real_manager->logs( lines => 7, argv => ['--system'] ), "system journal\n", 'default runner reads system-scope journal output' );
 }
 
+my $mac_tmp = tempdir( CLEANUP => 1 );
+my $mac_home = "$mac_tmp/home";
+my $mac_launch_agents = "$mac_tmp/LaunchAgents";
+my $mac_launch_daemons = "$mac_tmp/LaunchDaemons";
+my $mac_logs_dir = "$mac_tmp/Logs";
+my $mac_calls_log = "$mac_tmp/launchctl.log";
+my $mac_state_dir = "$mac_tmp/state";
+make_path( $mac_home, $mac_launch_agents, $mac_launch_daemons, $mac_logs_dir, $mac_state_dir );
+
+_write_executable(
+    "$real_bin/launchctl",
+    <<"EOF",
+#!/bin/sh
+printf '%s\\n' "\$*" >>"$mac_calls_log"
+state_dir="$mac_state_dir"
+loaded="$mac_state_dir/loaded"
+disabled="$mac_state_dir/disabled"
+case "\$1" in
+  enable)
+    rm -f "\$disabled"
+    exit 0
+    ;;
+  disable)
+    : >"\$disabled"
+    exit 0
+    ;;
+  load)
+    : >"\$loaded"
+    exit 0
+    ;;
+  unload)
+    rm -f "\$loaded"
+    exit 0
+    ;;
+  list)
+    if [ -f "\$loaded" ]; then
+      printf '{ "Label" = "developer-dashboard-startup" }\\n'
+    else
+      printf 'Could not find service "developer-dashboard-startup" in domain for uid: 501\\n'
+    fi
+    exit 0
+    ;;
+  print-disabled)
+    if [ -f "\$disabled" ]; then
+      printf '\\tdisabled services = {\\n\\t\\t"developer-dashboard-startup" => disabled\\n\\t}\\n'
+    else
+      printf '\\tdisabled services = {\\n\\t}\\n'
+    fi
+    exit 0
+    ;;
+esac
+exit 0
+EOF
+);
+
+my $mac_manager = DDStartup::Manager->new(
+    osname                    => 'darwin',
+    home                      => $mac_home,
+    cwd                       => $mac_home,
+    euid                      => 501,
+    dashboard_bin             => '/usr/local/bin/dashboard',
+    perl5lib                  => '/opt/dd/lib:/opt/perl5/lib/perl5',
+    launchctl_bin             => "$real_bin/launchctl",
+    user_launch_agents_dir    => $mac_launch_agents,
+    system_launch_daemons_dir => $mac_launch_daemons,
+    user_logs_dir             => $mac_logs_dir,
+    system_logs_dir           => "$mac_tmp/SystemLogs",
+);
+
+my $mac_setup = $mac_manager->setup();
+is( $mac_setup->{platform}, 'macos', 'mac setup reports the mac platform' );
+is( $mac_setup->{scope}, 'user', 'mac setup defaults to user scope' );
+like( $mac_setup->{unit_path}, qr/LaunchAgents\/developer-dashboard-startup\.plist\z/, 'mac setup returns the user plist path' );
+is( $mac_setup->{domain}, 'user/501', 'mac setup returns the expected launchctl domain' );
+is( $mac_setup->{wanted_by}, 'launchd', 'mac setup reports launchd instead of systemd wanted_by' );
+is( $mac_setup->{activation}, 'loaded', 'mac setup reports an immediate load when launchctl load succeeds' );
+
+open my $mfh, '<', $mac_setup->{unit_path} or die "Unable to read $mac_setup->{unit_path}: $!";
+local $/;
+my $plist = <$mfh>;
+close $mfh or die "Unable to close $mac_setup->{unit_path}: $!";
+like( $plist, qr/<key>Label<\/key>\s*<string>developer-dashboard-startup<\/string>/s, 'mac plist includes the launchd label' );
+like( $plist, qr/<key>RunAtLoad<\/key>\s*<true\/>/s, 'mac plist runs at load' );
+like( $plist, qr{\Q/usr/local/bin/dashboard\E}s, 'mac plist carries the dashboard path' );
+like( $plist, qr{\Q$mac_logs_dir/developer-dashboard-startup.log\E}s, 'mac plist writes stdout logs to the expected path' );
+like( $plist, qr{\Q$mac_logs_dir/developer-dashboard-startup.err.log\E}s, 'mac plist writes stderr logs to the expected path' );
+
+my $mac_status = $mac_manager->status();
+is( $mac_status->{enabled}, 'enabled', 'mac status reports the service as enabled' );
+is( $mac_status->{active}, 'active', 'mac status reports the service as active after setup' );
+
+_write_file( "$mac_logs_dir/developer-dashboard-startup.log", "alpha\nbeta\n" );
+_write_file( "$mac_logs_dir/developer-dashboard-startup.err.log", "gamma\n" );
+is( $mac_manager->logs( lines => 3 ), "alpha\nbeta\ngamma\n", 'mac logs return combined stdout and stderr log lines' );
+
+my $mac_disable = $mac_manager->disable();
+ok( $mac_disable->{disabled}, 'mac disable reports success' );
+ok( -e $mac_setup->{unit_path}, 'mac disable keeps the plist file for later enable' );
+my $mac_disabled_status = $mac_manager->status();
+is( $mac_disabled_status->{enabled}, 'disabled', 'mac status reports disabled after disable' );
+is( $mac_disabled_status->{active}, 'inactive', 'mac status reports inactive after disable' );
+
+my $mac_enable = $mac_manager->enable();
+is( $mac_enable->{scope}, 'user', 'mac enable returns user scope payload' );
+my $mac_reenabled_status = $mac_manager->status();
+is( $mac_reenabled_status->{enabled}, 'enabled', 'mac status reports enabled after enable' );
+is( $mac_reenabled_status->{active}, 'active', 'mac status reports active after enable' );
+
+my $mac_remove = $mac_manager->remove();
+ok( $mac_remove->{removed}, 'mac remove reports success' );
+ok( !-e $mac_setup->{unit_path}, 'mac remove deletes the plist file' );
+
+open my $mcl, '<', $mac_calls_log or die "Unable to read $mac_calls_log: $!";
+my $mac_calls = do { local $/; <$mcl> };
+close $mcl or die "Unable to close $mac_calls_log: $!";
+like( $mac_calls, qr/\Qenable user\/501\/developer-dashboard-startup\E/, 'mac setup enables the launchd label' );
+like( $mac_calls, qr/\Qload -w \E/, 'mac setup loads the launch agent plist' );
+like( $mac_calls, qr/\Qdisable user\/501\/developer-dashboard-startup\E/, 'mac disable disables the launchd label' );
+like( $mac_calls, qr/\Qunload -w \E/, 'mac disable or remove unloads the launchd job' );
+
+my $mac_auto_tmp = tempdir( CLEANUP => 1 );
+my $mac_auto_home = "$mac_auto_tmp/home";
+my $mac_auto_agents = "$mac_auto_tmp/LaunchAgents";
+my $mac_auto_logs = "$mac_auto_tmp/Logs";
+make_path( $mac_auto_home, $mac_auto_agents, $mac_auto_logs );
+my $mac_auto = DDStartup::Manager->new(
+    osname                 => 'darwin',
+    home                   => $mac_auto_home,
+    cwd                    => $mac_auto_home,
+    euid                   => 501,
+    dashboard_bin          => '/usr/local/bin/dashboard',
+    launchctl_bin          => "$real_bin/launchctl",
+    user_launch_agents_dir => $mac_auto_agents,
+    user_logs_dir          => $mac_auto_logs,
+);
+my $mac_auto_first = $mac_auto->auto_setup();
+ok( !$mac_auto_first->{skipped}, 'mac auto_setup provisions the launch agent on first install' );
+
 done_testing();
 
 sub _write_executable {
@@ -264,5 +402,13 @@ sub _write_executable {
     print {$fh} $content;
     close $fh or die "Unable to close $path: $!";
     chmod 0755, $path or die "Unable to chmod $path: $!";
+    return 1;
+}
+
+sub _write_file {
+    my ( $path, $content ) = @_;
+    open my $fh, '>', $path or die "Unable to write $path: $!";
+    print {$fh} $content;
+    close $fh or die "Unable to close $path: $!";
     return 1;
 }

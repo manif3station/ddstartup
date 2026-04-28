@@ -23,13 +23,15 @@ if ( @args >= 2 && $args[0] eq '--lines' ) {
 }
 
 my $manager = DDStartup::Manager->new();
+my $scope = $manager->scope_from_args(@args);
 my $logs = $manager->logs( lines => $lines, argv => \@args );
 print $manager->render_result(
     output => $output,
     type   => 'logs',
     result => {
-        scope        => $manager->scope_from_args(@args),
-        service_name => $manager->{service_name},
+        platform     => $manager->platform,
+        scope        => $scope,
+        service_name => $manager->service_name($scope),
         lines        => $lines,
         logs         => $logs,
     },
