@@ -6,6 +6,8 @@
 dashboard skills install git@github.com:manif3station/ddstartup.git
 ```
 
+On supported systemd hosts, install auto-provisions the startup unit. On unsupported hosts such as macOS, install completes but skips startup provisioning.
+
 ## Commands
 
 Output mode:
@@ -105,5 +107,5 @@ dashboard ddstartup.remove -o json
 
 - if `systemctl` is missing, setup, status, and remove fail
 - if `journalctl` is missing, logs fail
-- if the skill is installed on a non-systemd host, the install-time Makefile target fails because this release only supports `systemctl` and `journalctl`
+- if the skill is installed on a non-systemd host, the install-time Makefile target skips auto-setup because this release only supports `systemctl` and `journalctl`
 - if the host is not systemd-based, this skill is not the right startup manager yet

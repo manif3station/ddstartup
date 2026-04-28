@@ -1,5 +1,9 @@
 Revision history for ddstartup
 
+0.04 2026-04-28
+    - changed install-time auto-setup to skip cleanly on unsupported hosts
+    - kept explicit ddstartup systemd commands strict when systemctl is unavailable
+
 0.03 2026-04-28
     - fixed generated systemd units to preserve the active Perl runtime library path
     - made dashboard ddstartup.setup derive PERL5LIB from the running Perl @INC when the environment variable is unset

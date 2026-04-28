@@ -49,6 +49,20 @@ my $enable_count = () = $calls =~ /enable --now developer-dashboard-startup\.ser
 is( $enable_count, 1, 'auto-setup enables only on first install and does not override later state automatically' );
 like( $calls, qr/disable --now developer-dashboard-startup\.service/, 'disable was called after install' );
 
+my $unsupported_tmp = tempdir( CLEANUP => 1 );
+my $unsupported_bin = "$unsupported_tmp/bin";
+my $unsupported_home = "$unsupported_tmp/home";
+my $unsupported_units = "$unsupported_tmp/user-units";
+make_path( $unsupported_bin, $unsupported_home, $unsupported_units );
+_write_executable(
+    "$unsupported_bin/perl",
+    "#!/bin/sh\nexec \"$^X\" \"\$@\"\n",
+);
+
+my $unsupported_install = qx{PATH="$unsupported_bin:$ENV{PATH}" HOME="$unsupported_home" DDSTARTUP_USER_UNIT_DIR="$unsupported_units" DDSTARTUP_SYSTEMCTL_BIN="journalctl_bin" make install};
+is( $? >> 8, 0, 'make install stays clean on unsupported hosts' );
+ok( !-f "$unsupported_units/developer-dashboard-startup.service", 'unsupported-host install skips unit creation' );
+
 done_testing();
 
 sub _write_executable {

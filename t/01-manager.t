@@ -122,6 +122,20 @@ my $auto_skip = $manager->auto_setup();
 ok( $auto_skip->{skipped}, 'auto_setup skips when the unit already exists' );
 is( $auto_skip->{reason}, 'unit_exists', 'auto_setup explains why it skipped' );
 
+my $unsupported_auto = DDStartup::Manager->new(
+    home            => "$tmp/no-systemd-home",
+    cwd             => "$tmp/no-systemd-home",
+    euid            => 1000,
+    dashboard_bin   => '/usr/bin/dashboard',
+    systemctl_bin   => 'journalctl_bin',
+    journalctl_bin  => '/usr/bin/journalctl',
+    user_unit_dir   => "$tmp/no-systemd-user-units",
+    system_unit_dir => "$tmp/no-systemd-system-units",
+    runner          => sub { die 'auto_setup should not run systemctl on unsupported hosts' },
+)->auto_setup();
+ok( $unsupported_auto->{skipped}, 'auto_setup skips on unsupported hosts' );
+is( $unsupported_auto->{reason}, 'unsupported_host', 'auto_setup reports an unsupported-host skip reason' );
+
 @calls = ();
 my $remove = $manager->remove();
 ok( $remove->{removed}, 'remove reports the unit as removed' );

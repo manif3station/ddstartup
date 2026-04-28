@@ -19,7 +19,7 @@ docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-tes
 - Functional test:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'cd /workspace/skills/ddstartup && prove -lr t'`
   - Result: pass
-  - Test count: `Files=4, Tests=88`
+  - Test count: `Files=4, Tests=92`
 - Coverage test:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'cd /workspace/skills/ddstartup && cover -delete && HARNESS_PERL_SWITCHES=-MDevel::Cover prove -lr t && cover -report text -select_re "^lib/" -coverage statement -coverage subroutine'`
   - Result: pass
@@ -33,6 +33,13 @@ docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-tes
   - Result: pass, unit reported `Active: active (exited)` and `status=0/SUCCESS`
   - `journalctl --user -u developer-dashboard-startup.service --no-pager -n 20`
   - Result: pass, latest successful startup showed `dashboard restart` completing under systemd
+- macOS unsupported-host proof:
+  - `ssh macdev 'zsh -lic "cd /tmp/ddstartup-skill/ddstartup && make install"'`
+  - Result: pass, install-time auto-setup exited cleanly without aborting on macOS
+  - `ssh macdev 'zsh -lic "dashboard skills install /tmp/ddstartup-skill/ddstartup"'`
+  - Result: pass, skill installed successfully on macOS
+  - `ssh macdev 'zsh -lic "test -e ~/.config/systemd/user/developer-dashboard-startup.service; echo unit_exists=$?"'`
+  - Result: pass, returned `unit_exists=0`, proving no unsupported systemd unit was created
 - Cleanup:
   - `docker compose -f ~/projects/skills/docker-compose.testing.yml run --rm perl-test bash -lc 'rm -rf /workspace/skills/ddstartup/cover_db'`
   - Result: pass

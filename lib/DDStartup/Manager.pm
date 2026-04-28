@@ -68,6 +68,13 @@ sub auto_setup {
         skipped      => 1,
         reason       => 'unit_exists',
     } if -e $unit_path;
+    return {
+        scope        => $scope,
+        service_name => $self->{service_name},
+        unit_path    => $unit_path,
+        skipped      => 1,
+        reason       => 'unsupported_host',
+    } if !$self->_auto_setup_supported;
     return $self->setup(@args);
 }
 
@@ -262,6 +269,11 @@ sub _run_capture {
     return $self->{runner}->(@cmd);
 }
 
+sub _auto_setup_supported {
+    my ($self) = @_;
+    return _command_exists( $self->{systemctl_bin} );
+}
+
 sub _runtime_perl5lib {
     return $ENV{PERL5LIB} if defined $ENV{PERL5LIB} && $ENV{PERL5LIB} ne q{};
     my @inc = grep { defined && !ref } @INC;
@@ -310,6 +322,13 @@ sub _which {
         return $path if -x $path;
     }
     return;
+}
+
+sub _command_exists {
+    my ($name) = @_;
+    return 0 if !$name;
+    return -x $name ? 1 : 0 if $name =~ m{/};
+    return defined _which($name) ? 1 : 0;
 }
 
 1;

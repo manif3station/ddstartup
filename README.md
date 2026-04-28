@@ -59,7 +59,7 @@ Example:
 dashboard skills install git@github.com:manif3station/ddstartup.git
 ```
 
-When this skill is installed through `dashboard skills install`, its `Makefile` install target automatically provisions the startup unit. The user does not need to run a separate setup command after installation.
+When this skill is installed through `dashboard skills install`, its `Makefile` install target automatically provisions the startup unit on supported systemd hosts. On unsupported hosts such as macOS, install stays clean and skips the startup provisioning step instead of aborting the skill install.
 
 ## CLI Usage
 
@@ -223,7 +223,7 @@ dashboard skills uninstall ddstartup
 
 - if `systemctl` is not available, setup and status commands fail with a clear error
 - if `journalctl` is not available, logs fail with a clear error
-- if the skill is installed on a non-systemd host, the install step fails because the current release only supports `systemctl` and `journalctl`
+- if the skill is installed on a non-systemd host, the install step succeeds but skips auto-setup because the current release only supports `systemctl` and `journalctl`
 - if a non-root user needs a system unit, they must run setup with the privileges required by systemd and the target unit directory
 - if root runs setup without flags, the skill defaults to system scope
 - if a normal user runs setup without flags, the skill defaults to user scope
@@ -236,3 +236,4 @@ See:
 - `docs/usage.md`
 - `docs/changes/2026-04-28-ddstartup-bootstrap.md`
 - `docs/changes/2026-04-28-runtime-env-fix.md`
+- `docs/changes/2026-04-28-install-skip-on-unsupported-hosts.md`
