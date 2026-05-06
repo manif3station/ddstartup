@@ -70,6 +70,12 @@ When this skill is installed through `dashboard skills install`, its `Makefile` 
 
 In non-GUI macOS sessions such as an SSH shell, launchd may defer immediate loading even though the plist is installed and enabled. In that case `ddstartup` reports `activation=deferred` during setup and `active=configured` in status.
 
+## License
+
+`ddstartup` is released under the MIT License.
+
+See [LICENSE](LICENSE).
+
 ## CLI Usage
 
 Output mode:
