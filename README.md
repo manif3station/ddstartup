@@ -51,16 +51,10 @@ This skill adds:
 
 ## Installation
 
-Install the skill through Developer Dashboard from a git repository:
+Install the skill into Developer Dashboard by repo name:
 
 ```bash
-dashboard skills install <git-url-to-ddstartup-skill>
-```
-
-Example:
-
-```bash
-dashboard skills install git@github.com:manif3station/ddstartup.git
+dashboard skills install ddstartup
 ```
 
 When this skill is installed through `dashboard skills install`, its `Makefile` install target automatically provisions startup on supported hosts:
@@ -231,7 +225,7 @@ This skill does not add a browser interface. It is a CLI-only operational skill.
 Normal case, install DD startup for a user-managed home runtime on Linux:
 
 ```bash
-dashboard skills install git@github.com:manif3station/ddstartup.git
+dashboard skills install ddstartup
 ```
 
 That install path automatically provisions the startup unit.
@@ -239,7 +233,7 @@ That install path automatically provisions the startup unit.
 Normal case, install DD startup for a macOS user runtime:
 
 ```bash
-dashboard skills install git@github.com:manif3station/ddstartup.git
+dashboard skills install ddstartup
 ```
 
 That install path writes `~/Library/LaunchAgents/developer-dashboard-startup.plist`.
